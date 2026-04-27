@@ -1,0 +1,547 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  LEAD
+  TEAM
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  INACTIVE
+}
+
+enum ClientStatus {
+  ACTIVE
+  INACTIVE
+  POTENTIAL
+}
+
+enum ClientTier {
+  STRATEGIC
+  REGULAR
+  PUNCTUAL
+  POTENTIAL
+}
+
+enum ClientHistoryEventType {
+  client_created
+  status_changed
+  tier_changed
+  contact_added
+  contact_removed
+  contact_set_primary
+  tag_added
+  tag_removed
+  project_created
+  project_completed
+}
+
+enum ProjectStatus {
+  ACTIVE
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum TaskType {
+  DISENO
+  EDICION_VIDEO
+  ESTRATEGIA
+  PROPUESTA
+  PRODUCCION
+  POST_PRODUCCION
+  PRE_PRODUCCION
+  COPY
+  FOTOGRAFIA
+  CONTENIDO_REDES
+  OTRO
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  IN_REVIEW
+  COMPLETED
+  BLOCKED
+}
+
+enum RoleInProject {
+  lead
+  executor
+}
+
+enum ProjectFileType {
+  brief
+  reference
+  contract
+  other
+}
+
+enum ProjectHistoryEventType {
+  project_created
+  status_changed
+  end_date_changed
+  member_added
+  member_removed
+  task_created
+  task_status_changed
+  file_uploaded
+  file_deleted
+}
+
+enum ActivityEventType {
+  task_created
+  task_status_changed
+  task_assigned
+  project_created
+  project_status_changed
+  client_created
+  client_status_changed
+}
+
+enum ActivityEntityType {
+  task
+  project
+  client
+}
+
+model User {
+  id          String     @id @default(cuid())
+  name        String
+  email       String     @unique
+  password    String
+  role        Role       @default(TEAM)
+  status      UserStatus @default(ACTIVE)
+  area        String?
+  avatarUrl   String?
+  bio         String?
+  phone       String?
+  joinedAt    DateTime?
+  lastSeenAt  DateTime?
+  createdAt   DateTime   @default(now())
+
+  tasks               Task[]
+  activityLogs        ActivityLog[]
+  projectMemberships  ProjectMember[]          @relation("ProjectMemberUser")
+  projectMemberAdds   ProjectMember[]          @relation("ProjectMemberAddedBy")
+  teamspaceMemberships TeamspaceMember[]
+  projectFiles        ProjectFile[]
+  projectHistories    ProjectHistory[]
+  clientNotes         ClientNote[]
+  clientHistories     ClientHistory[]
+  skills              UserSkill[]
+  invitation          UserInvitation?
+  refreshTokens       RefreshToken[]
+  passwordResets      PasswordReset[]
+  permissionOverrides UserPermissionOverride[] @relation("UserOverrides")
+  grantedOverrides    UserPermissionOverride[] @relation("GrantedBy")
+  adminTasks          AdminTask[]              @relation("AdminTaskCreatedBy")
+  adminRecurrences    AdminTaskRecurrence[]    @relation("AdminRecurrenceCreatedBy")
+  adminTaskHistory    AdminTaskHistory[]       @relation("AdminTaskHistoryActor")
+
+  @@map("users")
+}
+
+model Skill {
+  id    String      @id @default(cuid())
+  name  String      @unique
+  users UserSkill[]
+
+  @@map("skills")
+}
+
+model UserSkill {
+  userId  String
+  skillId String
+  user    User   @relation(fields: [userId], references: [id])
+  skill   Skill  @relation(fields: [skillId], references: [id])
+
+  @@id([userId, skillId])
+  @@map("user_skills")
+}
+
+model UserInvitation {
+  id         String    @id @default(cuid())
+  userId     String    @unique
+  tokenHash  String    @unique
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id])
+
+  @@map("user_invitations")
+}
+
+model RefreshToken {
+  id         String    @id @default(cuid())
+  userId     String
+  tokenHash  String    @unique
+  deviceInfo String?
+  ipAddress  String?
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+  revokedAt  DateTime?
+  user       User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, revokedAt])
+  @@map("refresh_tokens")
+}
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@map("password_resets")
+}
+
+model UserPermissionOverride {
+  id          String   @id @default(cuid())
+  userId      String
+  permission  String
+  granted     Boolean
+  grantedById String
+  createdAt   DateTime @default(now())
+  user        User     @relation("UserOverrides", fields: [userId], references: [id])
+  grantedBy   User     @relation("GrantedBy", fields: [grantedById], references: [id])
+
+  @@unique([userId, permission])
+  @@index([userId])
+  @@map("user_permission_overrides")
+}
+
+model Client {
+  id            String       @id @default(cuid())
+  name          String
+  contactName   String
+  contactInfo   String
+  status        ClientStatus @default(ACTIVE)
+  industry      String?
+  tier          ClientTier   @default(REGULAR)
+  website       String?
+  description   String?
+  relationStart DateTime?
+  createdAt     DateTime     @default(now())
+  projects      Project[]
+  contacts      ClientContact[]
+  tags          ClientTag[]
+  notes         ClientNote[]
+  history       ClientHistory[]
+
+  @@map("clients")
+}
+
+model ClientContact {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id])
+  name      String
+  role      String?
+  email     String?
+  phone     String?
+  isPrimary Boolean  @default(false)
+  notes     String?
+  createdAt DateTime @default(now())
+
+  @@index([clientId, isPrimary])
+  @@map("client_contacts")
+}
+
+model Tag {
+  id      String      @id @default(cuid())
+  name    String      @unique
+  clients ClientTag[]
+
+  @@map("tags")
+}
+
+model ClientTag {
+  clientId String
+  tagId    String
+  client   Client @relation(fields: [clientId], references: [id])
+  tag      Tag    @relation(fields: [tagId], references: [id])
+
+  @@id([clientId, tagId])
+  @@index([clientId])
+  @@map("client_tags")
+}
+
+model ClientNote {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id])
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  content   String
+  isPinned  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([clientId, isPinned, createdAt(sort: Desc)])
+  @@map("client_notes")
+}
+
+model ClientHistory {
+  id          String                 @id @default(cuid())
+  clientId    String
+  client      Client                 @relation(fields: [clientId], references: [id])
+  actorId     String
+  actor       User                   @relation(fields: [actorId], references: [id])
+  eventType   ClientHistoryEventType
+  description String
+  meta        Json?
+  createdAt   DateTime               @default(now())
+
+  @@index([clientId, createdAt(sort: Desc)])
+  @@map("client_history")
+}
+
+model Project {
+  id             String        @id @default(cuid())
+  name           String
+  clientId       String
+  client         Client        @relation(fields: [clientId], references: [id])
+  teamspaceId    String?
+  teamspace      Teamspace?    @relation(fields: [teamspaceId], references: [id])
+  description    String?
+  status         ProjectStatus @default(ACTIVE)
+  startDate      DateTime
+  estimatedClose DateTime?
+  closedAt       DateTime?
+  createdAt      DateTime      @default(now())
+  tasks          Task[]
+  members        ProjectMember[]
+  files          ProjectFile[]
+  history        ProjectHistory[]
+
+  @@map("projects")
+}
+
+model Task {
+  id          String     @id @default(cuid())
+  title       String
+  description String?
+  projectId   String
+  project     Project    @relation(fields: [projectId], references: [id])
+  assignedTo  String?
+  assignee    User?      @relation(fields: [assignedTo], references: [id])
+  status      TaskStatus @default(PENDING)
+  taskType    TaskType?
+  dueDate     DateTime?
+  completedAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@map("tasks")
+}
+
+model ProjectMember {
+  id            String        @id @default(cuid())
+  projectId     String
+  project       Project       @relation(fields: [projectId], references: [id])
+  userId        String
+  user          User          @relation("ProjectMemberUser", fields: [userId], references: [id])
+  roleInProject RoleInProject @default(executor)
+  addedAt       DateTime      @default(now())
+  addedById     String
+  addedBy       User          @relation("ProjectMemberAddedBy", fields: [addedById], references: [id])
+
+  @@unique([projectId, userId])
+  @@index([projectId])
+  @@index([userId])
+  @@map("project_members")
+}
+
+model ProjectFile {
+  id           String          @id @default(cuid())
+  projectId    String
+  project      Project         @relation(fields: [projectId], references: [id])
+  uploadedById String
+  uploader     User            @relation(fields: [uploadedById], references: [id])
+  originalName String
+  storedName   String
+  filePath     String
+  fileType     ProjectFileType @default(other)
+  mimeType     String
+  sizeBytes    Int
+  createdAt    DateTime        @default(now())
+
+  @@index([projectId])
+  @@map("project_files")
+}
+
+model ProjectHistory {
+  id          String                  @id @default(cuid())
+  projectId   String
+  project     Project                 @relation(fields: [projectId], references: [id])
+  actorId     String
+  actor       User                    @relation(fields: [actorId], references: [id])
+  eventType   ProjectHistoryEventType
+  description String
+  meta        Json?
+  createdAt   DateTime                @default(now())
+
+  @@index([projectId, createdAt(sort: Desc)])
+  @@map("project_history")
+}
+
+// ── Admin Tasks ──────────────────────────────────────────────────────────────
+
+enum AdminTaskCategory {
+  EQUIPO
+  FINANZAS
+  LEGAL_CONTRATOS
+  INFRAESTRUCTURA
+  ESTRATEGIA
+  OPERACIONES
+  OTRO
+}
+
+enum AdminTaskPriority {
+  URGENTE
+  ALTA
+  NORMAL
+  BAJA
+}
+
+enum AdminTaskStatus {
+  PENDIENTE
+  EN_PROGRESO
+  BLOQUEADA
+  COMPLETADA
+  CANCELADA
+}
+
+enum RecurrenceFrequency {
+  DIARIO
+  SEMANAL
+  MENSUAL
+  TRIMESTRAL
+  SEMESTRAL
+  ANUAL
+}
+
+model AdminTaskRecurrence {
+  id               String              @id @default(cuid())
+  title            String
+  description      String?
+  category         AdminTaskCategory
+  priority         AdminTaskPriority   @default(NORMAL)
+  frequency        RecurrenceFrequency
+  dayOfMonth       Int?
+  monthOfYear      Int?
+  dayOfWeek        Int?
+  advanceDays      Int                 @default(0)
+  isActive         Boolean             @default(true)
+  lastGeneratedAt  DateTime?
+  nextGenerationAt DateTime?
+  createdById      String
+  createdAt        DateTime            @default(now())
+  createdBy        User                @relation("AdminRecurrenceCreatedBy", fields: [createdById], references: [id])
+  tasks            AdminTask[]
+
+  @@index([nextGenerationAt, isActive])
+  @@map("admin_task_recurrences")
+}
+
+model AdminTask {
+  id              String             @id @default(cuid())
+  title           String
+  description     String?
+  category        AdminTaskCategory
+  priority        AdminTaskPriority  @default(NORMAL)
+  status          AdminTaskStatus    @default(PENDIENTE)
+  dueDate         DateTime?
+  resolutionNotes String?
+  recurrenceId    String?
+  recurrence      AdminTaskRecurrence? @relation(fields: [recurrenceId], references: [id])
+  createdById     String
+  createdBy       User               @relation("AdminTaskCreatedBy", fields: [createdById], references: [id])
+  completedAt     DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  history         AdminTaskHistory[]
+
+  @@index([status, priority])
+  @@index([dueDate, status])
+  @@index([category, status])
+  @@map("admin_tasks")
+}
+
+model AdminTaskHistory {
+  id          String    @id @default(cuid())
+  taskId      String
+  task        AdminTask @relation(fields: [taskId], references: [id])
+  actorId     String
+  actor       User      @relation("AdminTaskHistoryActor", fields: [actorId], references: [id])
+  eventType   String
+  description String
+  meta        Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([taskId, createdAt(sort: Desc)])
+  @@map("admin_task_history")
+}
+
+// ── Teamspaces ───────────────────────────────────────────────────────────────
+
+enum TeamspaceVisibility {
+  OPEN
+  CLOSED
+  PRIVATE
+}
+
+model Teamspace {
+  id          String              @id @default(cuid())
+  name        String
+  emoji       String              @default("🏢")
+  description String?
+  visibility  TeamspaceVisibility @default(OPEN)
+  createdAt   DateTime            @default(now())
+  members     TeamspaceMember[]
+  projects    Project[]
+
+  @@map("teamspaces")
+}
+
+model TeamspaceMember {
+  teamspaceId String
+  userId      String
+  joinedAt    DateTime  @default(now())
+  teamspace   Teamspace @relation(fields: [teamspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([teamspaceId, userId])
+  @@index([userId])
+  @@map("teamspace_members")
+}
+
+model ActivityLog {
+  id         String              @id @default(cuid())
+  actorId    String
+  actor      User                @relation(fields: [actorId], references: [id])
+  eventType  ActivityEventType
+  entityType ActivityEntityType
+  entityId   String
+  entityName String
+  meta       Json?
+  createdAt  DateTime            @default(now())
+
+  @@index([createdAt(sort: Desc)])
+  @@index([actorId, createdAt(sort: Desc)])
+  @@index([entityType, entityId])
+  @@map("activity_log")
+}

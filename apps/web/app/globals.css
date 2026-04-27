@@ -1,0 +1,110 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50:  #edf4f7;
+  --color-brand-100: #cce2ed;
+  --color-brand-200: #99c5db;
+  --color-brand-300: #5ca4c3;
+  --color-brand-400: #2e84a8;
+  --color-brand-500: #1d6683;
+  --color-brand-600: #175063;
+  --color-brand-700: #17394f;
+  --color-brand-800: #0d2535;
+  --color-brand-900: #07131b;
+  --color-brand-950: #040d13;
+}
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --accent: #17394f;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+/* ── Auth screens ─────────────────────────────────────────────────────────── */
+.auth-root {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.auth-root input,
+.auth-root button,
+.auth-root textarea,
+.auth-root select {
+  font: inherit;
+}
+
+/* Scrollbar dark para auth */
+.auth-root ::-webkit-scrollbar       { width: 4px; }
+.auth-root ::-webkit-scrollbar-track { background: #0d0d0d; }
+.auth-root ::-webkit-scrollbar-thumb { background: #222; border-radius: 2px; }
+
+/* Shake keyframe for error inputs */
+@keyframes auth-shake {
+  0%   { transform: translateX(0); }
+  20%  { transform: translateX(-4px); }
+  40%  { transform: translateX(4px); }
+  60%  { transform: translateX(-3px); }
+  80%  { transform: translateX(3px); }
+  100% { transform: translateX(0); }
+}
+.auth-shake { animation: auth-shake 300ms ease; }
+
+/* Spinner */
+@keyframes auth-spin { to { transform: rotate(360deg); } }
+.auth-spinner { animation: auth-spin 0.8s linear infinite; }
+
+/* ── Safe area (iOS notch / home bar) ─────────────────────────────────────── */
+.safe-bottom {
+  padding-bottom: max(6rem, calc(env(safe-area-inset-bottom) + 5rem));
+}
+
+@supports not (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-bottom { padding-bottom: 6rem; }
+}
+
+/* Override on desktop — sidebar visible, no bottom nav */
+@media (min-width: 1024px) {
+  .safe-bottom { padding-bottom: 1.5rem !important; }
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────────────────── */
+
+/* Thin scrollbar inside sidebar nav */
+.sidebar-nav::-webkit-scrollbar       { width: 3px; }
+.sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+.sidebar-nav::-webkit-scrollbar-thumb { background: #1e1e1e; border-radius: 2px; }
+
+/* Nav item hover */
+.sidebar-nav-item:hover {
+  background-color: #161616 !important;
+}
+.sidebar-nav-item:hover span { color: #f0f0f0 !important; }
+.sidebar-nav-item:hover svg  { color: #888888 !important; }
+
+/* Project item hover */
+.sidebar-project-item:hover {
+  background-color: #161616 !important;
+}
+.sidebar-project-item:hover span { color: #f0f0f0 !important; }
+
+/* User block hover */
+.sidebar-user-block:hover { background-color: #161616 !important; }
+
+/* Footer buttons hover */
+.sidebar-footer-btn:hover { background-color: #161616 !important; }
+.sidebar-footer-btn:hover svg  { color: #888888 !important; }
+.sidebar-footer-btn:hover span { color: #888888 !important; }
+
+/* Icon button hover */
+.sidebar-icon-btn:hover { color: #888888 !important; }
+
+/* More link hover */
+.sidebar-more-link:hover { color: #4a9cc4 !important; }

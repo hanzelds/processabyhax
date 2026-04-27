@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 200" width="440" height="200">
+  <defs>
+    <style>
+      .hax-main { font-family: Georgia, 'Times New Roman', serif; font-size: 148px; font-weight: 700; fill: #17394f; letter-spacing: -4px; }
+      .hax-sub  { font-family: Georgia, 'Times New Roman', serif; font-size: 22px; font-weight: 400; fill: #17394f; letter-spacing: 3px; }
+    </style>
+  </defs>
+  <text class="hax-main" x="10" y="148">hax</text>
+  <text class="hax-sub"  x="220" y="185">estudio creativo</text>
+</svg>
