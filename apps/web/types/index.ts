@@ -1,4 +1,82 @@
 export type Role = 'ADMIN' | 'LEAD' | 'TEAM'
+
+// ── Content modules ───────────────────────────────────────────────────────────
+export type ContentType = 'reel' | 'carrusel' | 'post' | 'story' | 'video'
+export type ContentPlatform = 'instagram' | 'tiktok' | 'facebook' | 'linkedin' | 'youtube'
+export type BriefStatus =
+  | 'idea' | 'en_desarrollo' | 'revision_interna' | 'aprobacion_cliente'
+  | 'aprobado' | 'en_produccion' | 'entregado' | 'cancelado'
+export type BriefRole = 'guionista' | 'productor' | 'editor' | 'copy'
+export type RecurrenceFreq = 'semanal' | 'quincenal' | 'mensual'
+export type ContentPieceStatus = 'listo' | 'programado' | 'publicado' | 'en_revision' | 'pausado' | 'cancelado'
+export type CopyStatus = 'pendiente' | 'en_revision' | 'aprobado'
+
+export interface BriefAssignee {
+  id: string
+  userId: string
+  role: BriefRole
+  assignedAt: string
+  user: { id: string; name: string; email: string; area?: string | null; avatarUrl?: string | null }
+}
+
+export interface BriefHistoryEntry {
+  id: string
+  briefId: string
+  actorId: string
+  actor: { id: string; name: string }
+  eventType: string
+  description: string
+  meta?: Record<string, unknown>
+  createdAt: string
+}
+
+export interface ContentBrief {
+  id: string
+  clientId: string
+  client: { id: string; name: string }
+  title: string
+  type: ContentType
+  platforms: ContentPlatform[]
+  status: BriefStatus
+  concept?: string | null
+  script?: string | null
+  referencesUrls: string[]
+  copyDraft?: string | null
+  hashtags?: string | null
+  technicalNotes?: string | null
+  clientApprovalNotes?: string | null
+  isRecurring: boolean
+  recurrenceFreq?: RecurrenceFreq | null
+  createdBy: { id: string; name: string }
+  createdAt: string
+  updatedAt: string
+  assignees: BriefAssignee[]
+  history?: BriefHistoryEntry[]
+}
+
+export interface ContentPiece {
+  id: string
+  briefId?: string | null
+  brief?: { id: string; title: string; status: BriefStatus } | null
+  clientId: string
+  client: { id: string; name: string }
+  title: string
+  type: ContentType
+  platforms: ContentPlatform[]
+  status: ContentPieceStatus
+  copy?: string | null
+  hashtags?: string | null
+  referencesUrls: string[]
+  copyStatus: CopyStatus
+  publicationNotes?: string | null
+  scheduledDate?: string | null
+  scheduledTime?: string | null
+  publishedAt?: string | null
+  createdBy: { id: string; name: string }
+  createdAt: string
+  updatedAt: string
+  history?: Array<{ id: string; actor: { name: string }; description: string; createdAt: string }>
+}
 export type TeamspaceVisibility = 'OPEN' | 'CLOSED' | 'PRIVATE'
 
 export interface TeamspaceProject {

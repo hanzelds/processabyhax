@@ -12,6 +12,9 @@ import { projectFilesRouter } from './routes/projectFiles'
 import { adminTasksRouter } from './routes/adminTasks'
 import { teamspacesRouter } from './routes/teamspaces'
 import { generateRecurringAdminTasks } from './lib/recurringTasksJob'
+import { briefsRouter } from './routes/briefs'
+import { contentCalendarRouter } from './routes/contentCalendar'
+import { runContentAlerts } from './lib/contentAlertsJob'
 
 const app = express()
 const PORT = process.env.PORT || 4100
@@ -37,7 +40,9 @@ app.use('/api/projects/:id/files', projectFilesRouter)
 app.use('/api/tasks',       tasksRouter)
 app.use('/api/dashboard',   dashboardRouter)
 app.use('/api/admin/tasks', adminTasksRouter)
-app.use('/api/teamspaces', teamspacesRouter)
+app.use('/api/teamspaces',      teamspacesRouter)
+app.use('/api/briefs',          briefsRouter)
+app.use('/api/content',         contentCalendarRouter)
 
 app.all('*', (_, res) => res.status(404).json({ error: 'Not found' }))
 
@@ -50,7 +55,11 @@ function scheduleDailyAt7() {
   const msUntil = next.getTime() - now.getTime()
   setTimeout(() => {
     generateRecurringAdminTasks().catch(console.error)
-    setInterval(() => generateRecurringAdminTasks().catch(console.error), 24 * 60 * 60 * 1000)
+    runContentAlerts().catch(console.error)
+    setInterval(() => {
+      generateRecurringAdminTasks().catch(console.error)
+      runContentAlerts().catch(console.error)
+    }, 24 * 60 * 60 * 1000)
   }, msUntil)
 }
 

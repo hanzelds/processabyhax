@@ -276,3 +276,140 @@ export async function sendTaskStatusChangedEmail(params: {
   })
   if (error) console.error('[EMAIL] Status change error:', error)
 }
+
+// ── Brief assigned ────────────────────────────────────────────────────────────
+
+const BRIEF_ROLE_LABEL: Record<string, string> = {
+  guionista: 'Guionista', productor: 'Productor', editor: 'Editor', copy: 'Copy',
+}
+
+export async function sendBriefAssignedEmail(params: {
+  to: string; recipientName: string; assignerName: string;
+  briefTitle: string; role: string; clientName: string;
+}): Promise<void> {
+  const { to, recipientName, assignerName, briefTitle, role, clientName } = params
+  if (!process.env.RESEND_API_KEY) return
+  const link = `${APP_URL}/content/briefs`
+  const html = EMAIL_WRAPPER_OPEN
+    + h1(`Hola, ${recipientName.split(' ')[0]} 👋`)
+    + p(`<strong style="color:#17394f;">${assignerName}</strong> te asignó a un brief de contenido como <strong>${BRIEF_ROLE_LABEL[role] ?? role}</strong>:`)
+    + card([
+        `<p style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:16px;font-weight:700;color:#0f172a;margin:0 0 16px;">${briefTitle}</p>`,
+        cardRow('Cliente', clientName),
+        cardRow('Tu rol', BRIEF_ROLE_LABEL[role] ?? role),
+      ])
+    + btn(link, 'Ver preproducción')
+    + EMAIL_WRAPPER_CLOSE
+  const { error } = await resend.emails.send({ from: FROM, to, subject: `Nueva asignación de contenido — ${briefTitle}`, html })
+  if (error) console.error('[EMAIL] Brief assigned error:', error)
+}
+
+// ── Brief status changed ──────────────────────────────────────────────────────
+
+const BRIEF_STATUS_LABEL: Record<string, string> = {
+  idea: 'Idea', en_desarrollo: 'En desarrollo', revision_interna: 'Revisión interna',
+  aprobacion_cliente: 'Aprobación del cliente', aprobado: 'Aprobado',
+  en_produccion: 'En producción', entregado: 'Entregado', cancelado: 'Cancelado',
+}
+
+export async function sendBriefStatusEmail(params: {
+  brief: { id: string; title: string; client: { name: string }; assignees: { user: { email: string; name: string } }[] };
+  status: string; actor: string;
+}): Promise<void> {
+  const { brief, status, actor } = params
+  if (!process.env.RESEND_API_KEY) return
+  const link = `${APP_URL}/content/briefs`
+  const label = BRIEF_STATUS_LABEL[status] ?? status
+
+  let to: string[] = []
+  if (status === 'revision_interna' || status === 'entregado') {
+    const users = await (await import('../lib/prisma')).prisma.user.findMany({ where: { role: { in: ['ADMIN', 'LEAD'] }, status: 'ACTIVE' }, select: { email: true } })
+    to = users.map(u => u.email)
+  } else if (status === 'aprobacion_cliente') {
+    const users = await (await import('../lib/prisma')).prisma.user.findMany({ where: { role: 'ADMIN', status: 'ACTIVE' }, select: { email: true } })
+    to = users.map(u => u.email)
+  } else if (status === 'aprobado') {
+    to = brief.assignees.map(a => a.user.email)
+  }
+  if (!to.length) return
+
+  const html = EMAIL_WRAPPER_OPEN
+    + h1(`Brief: ${label}`)
+    + p(`<strong style="color:#17394f;">${actor}</strong> actualizó el estado del brief:`)
+    + card([
+        `<p style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:16px;font-weight:700;color:#0f172a;margin:0 0 16px;">${brief.title}</p>`,
+        cardRow('Cliente', brief.client.name),
+        cardRow('Nuevo estado', label),
+      ])
+    + btn(link, 'Ver en Processa')
+    + EMAIL_WRAPPER_CLOSE
+  const { error } = await resend.emails.send({ from: FROM, to, subject: `Brief ${label} — ${brief.title}`, html })
+  if (error) console.error('[EMAIL] Brief status error:', error)
+}
+
+// ── Piece scheduled ───────────────────────────────────────────────────────────
+
+export async function sendPieceScheduledEmail(params: {
+  adminEmails: string[]; pieceTitle: string; clientName: string;
+  scheduledDate: string; scheduledTime: string | null;
+}): Promise<void> {
+  const { adminEmails, pieceTitle, clientName, scheduledDate, scheduledTime } = params
+  if (!adminEmails.length || !process.env.RESEND_API_KEY) return
+  const dateStr = new Date(scheduledDate).toLocaleDateString('es-DO', { weekday: 'long', day: 'numeric', month: 'long' })
+  const html = EMAIL_WRAPPER_OPEN
+    + h1('Pieza programada 📅')
+    + p(`Una pieza fue programada en el calendario:`)
+    + card([
+        `<p style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:16px;font-weight:700;color:#0f172a;margin:0 0 16px;">${pieceTitle}</p>`,
+        cardRow('Cliente', clientName),
+        cardRow('Fecha', dateStr),
+        ...(scheduledTime ? [cardRow('Hora', scheduledTime)] : []),
+      ])
+    + btn(`${APP_URL}/content/calendar`, 'Ver calendario')
+    + EMAIL_WRAPPER_CLOSE
+  const { error } = await resend.emails.send({ from: FROM, to: adminEmails, subject: `Programado — ${pieceTitle} · ${dateStr}`, html })
+  if (error) console.error('[EMAIL] Piece scheduled error:', error)
+}
+
+// ── Piece published ───────────────────────────────────────────────────────────
+
+export async function sendPiecePublishedEmail(params: {
+  adminEmails: string[]; pieceTitle: string; clientName: string; publisherName: string;
+}): Promise<void> {
+  const { adminEmails, pieceTitle, clientName, publisherName } = params
+  if (!adminEmails.length || !process.env.RESEND_API_KEY) return
+  const html = EMAIL_WRAPPER_OPEN
+    + h1('Contenido publicado ✅')
+    + p(`<strong style="color:#17394f;">${publisherName}</strong> marcó una pieza como publicada:`)
+    + card([
+        `<p style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:16px;font-weight:700;color:#0f172a;margin:0 0 16px;">${pieceTitle}</p>`,
+        cardRow('Cliente', clientName),
+      ])
+    + btn(`${APP_URL}/content/calendar`, 'Ver calendario')
+    + EMAIL_WRAPPER_CLOSE
+  const { error } = await resend.emails.send({ from: FROM, to: adminEmails, subject: `Publicado — ${pieceTitle}`, html })
+  if (error) console.error('[EMAIL] Piece published error:', error)
+}
+
+// ── Copy alert (48h warning) ──────────────────────────────────────────────────
+
+export async function sendCopyAlertEmail(params: {
+  adminEmails: string[]; pieceTitle: string; clientName: string; scheduledDate: string;
+}): Promise<void> {
+  const { adminEmails, pieceTitle, clientName, scheduledDate } = params
+  if (!adminEmails.length || !process.env.RESEND_API_KEY) return
+  const dateStr = new Date(scheduledDate).toLocaleDateString('es-DO', { weekday: 'long', day: 'numeric', month: 'long' })
+  const html = EMAIL_WRAPPER_OPEN
+    + h1('⚠️ Copy pendiente — publicación en 48h')
+    + p(`Esta pieza se publica en menos de 48 horas y su copy aún está <strong style="color:#d97706;">pendiente</strong>:`)
+    + card([
+        `<p style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:16px;font-weight:700;color:#0f172a;margin:0 0 16px;">${pieceTitle}</p>`,
+        cardRow('Cliente', clientName),
+        cardRow('Publicación', dateStr),
+        cardRow('Copy', '<span style="color:#d97706;font-weight:700;">Pendiente ⚠️</span>'),
+      ])
+    + btn(`${APP_URL}/content/calendar`, 'Ver en calendario')
+    + EMAIL_WRAPPER_CLOSE
+  const { error } = await resend.emails.send({ from: FROM, to: adminEmails, subject: `⚠️ Copy pendiente — ${pieceTitle} se publica ${dateStr}`, html })
+  if (error) console.error('[EMAIL] Copy alert error:', error)
+}

@@ -147,6 +147,13 @@ model User {
   adminTasks          AdminTask[]              @relation("AdminTaskCreatedBy")
   adminRecurrences    AdminTaskRecurrence[]    @relation("AdminRecurrenceCreatedBy")
   adminTaskHistory    AdminTaskHistory[]       @relation("AdminTaskHistoryActor")
+  // Content modules
+  briefsCreated       ContentBrief[]           @relation("BriefCreatedBy")
+  briefAssignments    BriefAssignee[]          @relation("BriefAssigneeUser")
+  briefsAssigned      BriefAssignee[]          @relation("BriefAssignedBy")
+  briefHistory        BriefHistory[]           @relation("BriefHistoryActor")
+  contentPieces       ContentPiece[]           @relation("PieceCreatedBy")
+  pieceHistory        ContentPieceHistory[]    @relation("PieceHistoryActor")
 
   @@map("users")
 }
@@ -240,6 +247,8 @@ model Client {
   tags          ClientTag[]
   notes         ClientNote[]
   history       ClientHistory[]
+  briefs        ContentBrief[]
+  contentPieces ContentPiece[]
 
   @@map("clients")
 }
@@ -544,4 +553,159 @@ model ActivityLog {
   @@index([actorId, createdAt(sort: Desc)])
   @@index([entityType, entityId])
   @@map("activity_log")
+}
+
+// ── Content Modules ──────────────────────────────────────────────────────────
+
+enum ContentType {
+  reel
+  carrusel
+  post
+  story
+  video
+}
+
+enum BriefStatus {
+  idea
+  en_desarrollo
+  revision_interna
+  aprobacion_cliente
+  aprobado
+  en_produccion
+  entregado
+  cancelado
+}
+
+enum BriefRole {
+  guionista
+  productor
+  editor
+  copy
+}
+
+enum RecurrenceFreq {
+  semanal
+  quincenal
+  mensual
+}
+
+enum ContentPieceStatus {
+  listo
+  programado
+  publicado
+  en_revision
+  pausado
+  cancelado
+}
+
+enum CopyStatus {
+  pendiente
+  en_revision
+  aprobado
+}
+
+model ContentBrief {
+  id                  String          @id @default(cuid())
+  clientId            String
+  client              Client          @relation(fields: [clientId], references: [id])
+  title               String
+  type                ContentType
+  platforms           String[]
+  status              BriefStatus     @default(idea)
+  concept             String?
+  script              String?
+  referencesUrls      String[]
+  copyDraft           String?
+  hashtags            String?
+  technicalNotes      String?
+  clientApprovalNotes String?
+  isRecurring         Boolean         @default(false)
+  recurrenceFreq      RecurrenceFreq?
+  createdById         String
+  createdBy           User            @relation("BriefCreatedBy", fields: [createdById], references: [id])
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  assignees           BriefAssignee[]
+  history             BriefHistory[]
+  contentPieces       ContentPiece[]
+
+  @@index([clientId, status])
+  @@index([status])
+  @@map("content_briefs")
+}
+
+model BriefAssignee {
+  id           String       @id @default(cuid())
+  briefId      String
+  brief        ContentBrief @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User         @relation("BriefAssigneeUser", fields: [userId], references: [id])
+  role         BriefRole
+  assignedById String
+  assignedBy   User         @relation("BriefAssignedBy", fields: [assignedById], references: [id])
+  assignedAt   DateTime     @default(now())
+
+  @@unique([briefId, userId, role])
+  @@index([briefId, userId])
+  @@map("brief_assignees")
+}
+
+model BriefHistory {
+  id          String       @id @default(cuid())
+  briefId     String
+  brief       ContentBrief @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  actorId     String
+  actor       User         @relation("BriefHistoryActor", fields: [actorId], references: [id])
+  eventType   String
+  description String
+  meta        Json?
+  createdAt   DateTime     @default(now())
+
+  @@index([briefId, createdAt(sort: Desc)])
+  @@map("brief_history")
+}
+
+model ContentPiece {
+  id               String             @id @default(cuid())
+  briefId          String?
+  brief            ContentBrief?      @relation(fields: [briefId], references: [id])
+  clientId         String
+  client           Client             @relation(fields: [clientId], references: [id])
+  title            String
+  type             ContentType
+  platforms        String[]
+  status           ContentPieceStatus @default(listo)
+  copy             String?
+  hashtags         String?
+  referencesUrls   String[]
+  copyStatus       CopyStatus         @default(pendiente)
+  publicationNotes String?
+  scheduledDate    DateTime?          @db.Date
+  scheduledTime    String?
+  publishedAt      DateTime?
+  createdById      String
+  createdBy        User               @relation("PieceCreatedBy", fields: [createdById], references: [id])
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  history          ContentPieceHistory[]
+
+  @@index([scheduledDate, status])
+  @@index([clientId, status])
+  @@index([briefId])
+  @@map("content_pieces")
+}
+
+model ContentPieceHistory {
+  id          String       @id @default(cuid())
+  pieceId     String
+  piece       ContentPiece @relation(fields: [pieceId], references: [id], onDelete: Cascade)
+  actorId     String
+  actor       User         @relation("PieceHistoryActor", fields: [actorId], references: [id])
+  eventType   String
+  description String
+  meta        Json?
+  createdAt   DateTime     @default(now())
+
+  @@index([pieceId, createdAt(sort: Desc)])
+  @@map("content_piece_history")
 }

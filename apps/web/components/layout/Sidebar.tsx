@@ -9,7 +9,7 @@ import { User } from '@/types'
 import { SidebarTeamspaces } from './SidebarTeamspaces'
 import {
   CheckSquare, FolderKanban, Users, Building2,
-  Settings, LogOut, ChevronLeft, ChevronRight, type LucideIcon,
+  Settings, LogOut, ChevronLeft, ChevronRight, CalendarDays, Clapperboard, type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -118,6 +118,13 @@ function getNavSections(role: string) {
         { href: '/projects',  label: 'Proyectos',  icon: FolderKanban,  hasBadge: false },
       ],
     },
+    ...(role !== 'TEAM' ? [{
+      title: 'Contenido',
+      items: [
+        { href: '/content/calendar', label: 'Calendario',    icon: CalendarDays,  hasBadge: false },
+        { href: '/content/briefs',   label: 'Preproducción', icon: Clapperboard,  hasBadge: false },
+      ],
+    }] : []),
     ...(role !== 'TEAM' ? [{
       title: 'Clientes',
       items: [
