@@ -1,11 +1,10 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { ContentPiece, ContentPieceStatus, Client, ContentType, ContentPlatform, CopyStatus } from '@/types'
+import { useRouter } from 'next/navigation'
+import { ContentPiece } from '@/types'
 import {
-  PIECE_STATUS_DOT, PIECE_STATUS_COLOR, PIECE_STATUS_LABEL,
-  COPY_STATUS_COLOR, COPY_STATUS_LABEL, CONTENT_TYPE_ICON,
-  PLATFORM_LABEL, clientColor,
+  PIECE_STATUS_DOT, CONTENT_TYPE_ICON, PLATFORM_LABEL,
 } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { ChevronLeft, ChevronRight, Plus, AlertTriangle } from 'lucide-react'
@@ -21,30 +20,38 @@ function calendarDays(year: number, month: number): Date[] {
   const first = new Date(year, month - 1, 1)
   const last  = new Date(year, month, 0)
   const days: Date[] = []
-  // Pad to Monday
   const startDow = (first.getDay() + 6) % 7
   for (let i = startDow; i > 0; i--) {
     const d = new Date(first); d.setDate(d.getDate() - i); days.push(d)
   }
   for (let d = new Date(first); d <= last; d.setDate(d.getDate() + 1)) days.push(new Date(d))
-  // Pad to complete grid row
   while (days.length % 7 !== 0) {
     const d = new Date(days[days.length - 1]); d.setDate(d.getDate() + 1); days.push(d)
   }
   return days
 }
 
+// ── Status border map (full 7 statuses) ─────────────────────────────────────
+
+const PIECE_CHIP_BORDER: Record<string, string> = {
+  listo:      'border-l-teal-400',
+  programado: 'border-l-purple-500',
+  publicado:  'border-l-emerald-500',
+  en_revision:'border-l-yellow-400',
+  en_edicion: 'border-l-indigo-500',
+  pausado:    'border-l-slate-300',
+  cancelado:  'border-l-red-400',
+}
+
 // ── Compact piece card ────────────────────────────────────────────────────────
 
 function PieceChip({ piece, onClick }: { piece: ContentPiece; onClick: () => void }) {
   const copyAlert = piece.copyStatus === 'pendiente' && piece.status === 'programado'
+  const borderColor = PIECE_CHIP_BORDER[piece.status] ?? 'border-l-slate-300'
   return (
     <div
       onClick={e => { e.stopPropagation(); onClick() }}
-      className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] cursor-pointer hover:opacity-80 transition-opacity border-l-2 bg-white border border-slate-100 ${
-        piece.status === 'publicado' ? 'border-l-emerald-400' :
-        piece.status === 'programado' ? 'border-l-purple-400' : 'border-l-slate-300'
-      }`}
+      className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] cursor-pointer hover:opacity-80 transition-opacity border-l-2 bg-white border border-slate-100 ${borderColor}`}
     >
       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${PIECE_STATUS_DOT[piece.status]}`} />
       <span className="font-medium text-slate-700 truncate">{piece.title}</span>
@@ -55,13 +62,23 @@ function PieceChip({ piece, onClick }: { piece: ContentPiece; onClick: () => voi
 
 // ── Inbox panel ───────────────────────────────────────────────────────────────
 
-function InboxItem({ piece, onSchedule, onClick }: {
+const PIECE_INBOX_BORDER: Record<string, string> = {
+  listo:      'border-l-teal-400',
+  programado: 'border-l-purple-500',
+  publicado:  'border-l-emerald-500',
+  en_revision:'border-l-yellow-400',
+  en_edicion: 'border-l-indigo-500',
+  pausado:    'border-l-slate-300',
+  cancelado:  'border-l-red-400',
+}
+
+function InboxItem({ piece, onClick }: {
   piece: ContentPiece
-  onSchedule: (id: string, date: string) => void
   onClick: () => void
 }) {
   const [dragging, setDragging] = useState(false)
   const copyAlert = piece.copyStatus === 'pendiente'
+  const borderColor = PIECE_INBOX_BORDER[piece.status] ?? 'border-l-slate-300'
 
   return (
     <div
@@ -69,18 +86,19 @@ function InboxItem({ piece, onSchedule, onClick }: {
       onDragStart={e => { e.dataTransfer.setData('pieceId', piece.id); setDragging(true) }}
       onDragEnd={() => setDragging(false)}
       onClick={onClick}
-      className={`bg-white border rounded-xl p-3 cursor-grab active:cursor-grabbing transition-all ${
-        dragging ? 'opacity-40 rotate-1' : 'border-slate-100 hover:border-slate-200 hover:shadow-sm'
+      className={`bg-white border border-l-4 rounded-xl p-3 cursor-grab active:cursor-grabbing transition-all ${borderColor} ${
+        dragging ? 'opacity-40 rotate-1 border-slate-100' : 'border-slate-100 hover:border-slate-200 hover:shadow-sm'
       }`}
     >
       <div className="flex items-start justify-between gap-2 mb-1">
         <p className="text-xs font-semibold text-slate-800 leading-snug line-clamp-2">{piece.title}</p>
         <span className="text-base shrink-0">{CONTENT_TYPE_ICON[piece.type]}</span>
       </div>
+      <div className="flex items-center gap-1.5 flex-wrap mb-1">
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${PIECE_STATUS_DOT[piece.status]}`} />
+        <span className="text-[10px] text-slate-400 font-medium">{piece.status.replace('_', ' ')}</span>
+      </div>
       <div className="flex items-center gap-1 flex-wrap">
-        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full text-white ${clientColor(piece.clientId)}`}>
-          {piece.client.name}
-        </span>
         {piece.platforms.map(p => (
           <span key={p} className="text-[9px] font-semibold px-1 py-0.5 bg-slate-100 text-slate-500 rounded">
             {PLATFORM_LABEL[p]}
@@ -101,22 +119,21 @@ function InboxItem({ piece, onSchedule, onClick }: {
 interface Props {
   initialPieces: ContentPiece[]
   initialInbox: ContentPiece[]
-  clients: Client[]
+  selectedClientId: string
   isAdmin: boolean
 }
 
-export function CalendarView({ initialPieces, initialInbox, clients, isAdmin }: Props) {
+export function CalendarView({ initialPieces, initialInbox, selectedClientId, isAdmin }: Props) {
+  const router = useRouter()
   const now   = new Date()
   const [year, setYear]   = useState(now.getFullYear())
   const [month, setMonth] = useState(now.getMonth() + 1)
-  const [pieces, setPieces]   = useState(initialPieces)
-  const [inbox, setInbox]     = useState(initialInbox)
+  const [pieces, setPieces] = useState(initialPieces)
+  const [inbox, setInbox]   = useState(initialInbox)
   const [selected, setSelected] = useState<ContentPiece | null>(null)
-  const [creating, setCreating] = useState<string | null>(null) // default date for new
-  const [filterClient, setFilterClient] = useState('')
   const [hoveredDay, setHoveredDay] = useState<string | null>(null)
 
-  const days = calendarDays(year, month)
+  const days  = calendarDays(year, month)
   const today = isoDate(now)
 
   function navigate(delta: number) {
@@ -124,20 +141,17 @@ export function CalendarView({ initialPieces, initialInbox, clients, isAdmin }: 
     if (m > 12) { m = 1; y++ }
     if (m < 1)  { m = 12; y-- }
     setMonth(m); setYear(y)
-    // Fetch new month data
     fetchMonth(y, m)
   }
 
   async function fetchMonth(y: number, m: number) {
-    const params = new URLSearchParams({ year: String(y), month: String(m) })
-    if (filterClient) params.set('clientId', filterClient)
+    const params = new URLSearchParams({ year: String(y), month: String(m), clientId: selectedClientId })
     const data = await api.get<ContentPiece[]>(`/api/content/calendar?${params}`)
     setPieces(data)
   }
 
   function piecesForDay(dateStr: string) {
     return pieces.filter(p => p.scheduledDate?.startsWith(dateStr))
-      .filter(p => !filterClient || p.clientId === filterClient)
   }
 
   async function handleDrop(e: React.DragEvent, date: Date) {
@@ -146,7 +160,6 @@ export function CalendarView({ initialPieces, initialInbox, clients, isAdmin }: 
     if (!pieceId) return
     const dateStr = isoDate(date)
 
-    // Optimistic update
     const piece = inbox.find(p => p.id === pieceId) ?? pieces.find(p => p.id === pieceId)
     if (!piece) return
 
@@ -171,17 +184,19 @@ export function CalendarView({ initialPieces, initialInbox, clients, isAdmin }: 
     setSelected(updated)
   }, [])
 
-  const handlePieceCreate = useCallback((created: ContentPiece) => {
-    if (created.scheduledDate) {
-      setPieces(prev => [created, ...prev])
-    } else {
-      setInbox(prev => [created, ...prev])
-    }
-    setCreating(null)
-    setSelected(created)
+  const handlePieceDelete = useCallback((id: string) => {
+    setPieces(prev => prev.filter(p => p.id !== id))
+    setInbox(prev => prev.filter(p => p.id !== id))
+    setSelected(null)
   }, [])
 
   const monthName = new Date(year, month - 1, 1).toLocaleDateString('es-DO', { month: 'long', year: 'numeric' })
+
+  function goToNew(date?: string) {
+    const q = new URLSearchParams({ clientId: selectedClientId })
+    if (date) q.set('date', date)
+    router.push(`/content/calendar/new?${q}`)
+  }
 
   return (
     <div className="flex gap-4 h-full">
@@ -193,19 +208,21 @@ export function CalendarView({ initialPieces, initialInbox, clients, isAdmin }: 
             <button onClick={() => navigate(-1)} className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-50"><ChevronLeft className="w-4 h-4" /></button>
             <h2 className="text-base font-semibold text-slate-800 capitalize">{monthName}</h2>
             <button onClick={() => navigate(1)} className="w-8 h-8 flex items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-50"><ChevronRight className="w-4 h-4" /></button>
-            <button onClick={() => { setYear(now.getFullYear()); setMonth(now.getMonth() + 1); fetchMonth(now.getFullYear(), now.getMonth() + 1) }} className="text-xs text-slate-500 border border-slate-200 rounded-lg px-2.5 py-1 hover:bg-slate-50">Hoy</button>
+            <button
+              onClick={() => { setYear(now.getFullYear()); setMonth(now.getMonth() + 1); fetchMonth(now.getFullYear(), now.getMonth() + 1) }}
+              className="text-xs text-slate-500 border border-slate-200 rounded-lg px-2.5 py-1 hover:bg-slate-50"
+            >
+              Hoy
+            </button>
           </div>
-          <div className="flex items-center gap-2">
-            <select value={filterClient} onChange={e => { setFilterClient(e.target.value); fetchMonth(year, month) }} className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none">
-              <option value="">Todos los clientes</option>
-              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            {isAdmin && (
-              <button onClick={() => setCreating(today)} className="flex items-center gap-1.5 bg-[#17394f] text-white text-sm font-medium rounded-lg px-3 py-1.5">
-                <Plus className="w-4 h-4" /> Nueva pieza
-              </button>
-            )}
-          </div>
+          {isAdmin && (
+            <button
+              onClick={() => goToNew(today)}
+              className="flex items-center gap-1.5 bg-[#17394f] text-white text-sm font-medium rounded-lg px-3 py-1.5"
+            >
+              <Plus className="w-4 h-4" /> Nueva pieza
+            </button>
+          )}
         </div>
 
         {/* Day names */}
@@ -229,13 +246,12 @@ export function CalendarView({ initialPieces, initialInbox, clients, isAdmin }: 
                 key={i}
                 className={`bg-white min-h-[90px] p-1.5 flex flex-col transition-colors ${
                   !isCurrentMonth ? 'opacity-40' : ''
-                } ${isHovered ? 'bg-[#17394f]/5' : ''}`}
+                } ${isHovered ? 'bg-[#17394f]/5' : ''} ${isAdmin ? 'cursor-pointer hover:bg-slate-50' : ''}`}
                 onDragOver={e => { e.preventDefault(); setHoveredDay(ds) }}
                 onDragLeave={() => setHoveredDay(null)}
                 onDrop={e => handleDrop(e, day)}
-                onClick={() => isAdmin && setCreating(ds)}
+                onClick={() => isAdmin && goToNew(ds)}
               >
-                {/* Day number */}
                 <div className="flex items-center justify-between mb-1">
                   <span className={`text-xs font-semibold w-6 h-6 flex items-center justify-center rounded-full ${
                     isToday ? 'bg-[#17394f] text-white' : 'text-slate-600'
@@ -243,7 +259,6 @@ export function CalendarView({ initialPieces, initialInbox, clients, isAdmin }: 
                     {day.getDate()}
                   </span>
                 </div>
-                {/* Pieces */}
                 <div className="space-y-0.5 flex-1">
                   {dayPieces.slice(0, 3).map(p => (
                     <PieceChip key={p.id} piece={p} onClick={() => setSelected(p)} />
@@ -259,25 +274,17 @@ export function CalendarView({ initialPieces, initialInbox, clients, isAdmin }: 
       </div>
 
       {/* ── Inbox sidebar ── */}
-      <div className="w-64 shrink-0 flex flex-col">
+      <div className="w-60 shrink-0 flex flex-col">
         <div className="bg-white rounded-2xl border border-slate-200 flex flex-col flex-1 overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Sin programar</p>
-            <p className="text-xs text-slate-400 mt-0.5">{inbox.filter(p => !filterClient || p.clientId === filterClient).length} piezas · arrastra al calendario</p>
+            <p className="text-xs text-slate-400 mt-0.5">{inbox.length} piezas · arrastra al calendario</p>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            {inbox
-              .filter(p => !filterClient || p.clientId === filterClient)
-              .map(p => (
-                <InboxItem
-                  key={p.id}
-                  piece={p}
-                  onSchedule={() => {}}
-                  onClick={() => setSelected(p)}
-                />
-              ))
-            }
-            {inbox.filter(p => !filterClient || p.clientId === filterClient).length === 0 && (
+            {inbox.map(p => (
+              <InboxItem key={p.id} piece={p} onClick={() => setSelected(p)} />
+            ))}
+            {inbox.length === 0 && (
               <div className="text-center py-8">
                 <p className="text-xs text-slate-300 font-medium">Bandeja vacía</p>
                 <p className="text-[10px] text-slate-200 mt-1">Las piezas listas aparecen aquí</p>
@@ -291,23 +298,11 @@ export function CalendarView({ initialPieces, initialInbox, clients, isAdmin }: 
       {selected && (
         <PieceModal
           piece={selected}
-          clients={clients}
+          clients={[]}
           isAdmin={isAdmin}
           onUpdate={handlePieceUpdate}
+          onDelete={handlePieceDelete}
           onClose={() => setSelected(null)}
-        />
-      )}
-
-      {/* Create piece modal */}
-      {creating !== null && (
-        <PieceModal
-          piece={null}
-          defaultDate={creating}
-          clients={clients}
-          isAdmin={isAdmin}
-          onUpdate={() => {}}
-          onCreate={handlePieceCreate}
-          onClose={() => setCreating(null)}
         />
       )}
     </div>

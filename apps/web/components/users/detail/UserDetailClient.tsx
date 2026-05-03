@@ -10,6 +10,7 @@ import { UserActivityTab } from './activity/UserActivityTab'
 import { UserSecurityTab } from './security/UserSecurityTab'
 import { UserPermissionsTab } from './permissions/UserPermissionsTab'
 import { api } from '@/lib/api'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
 
 interface Props {
   user: User
@@ -108,8 +109,15 @@ function ReactivateButton({ userId, onUpdate }: { userId: string; onUpdate: (u: 
 }
 
 function DeactivateButton({ userId, onUpdate }: { userId: string; onUpdate: (u: User) => void }) {
+  const confirm = useConfirm()
   async function handle() {
-    if (!confirm('¿Dar de baja a este usuario? Esta acción revoca su acceso permanentemente.')) return
+    const ok = await confirm({
+      title: 'Dar de baja',
+      message: '¿Dar de baja a este usuario? Esta acción revoca su acceso permanentemente.',
+      confirmLabel: 'Dar de baja',
+      danger: true,
+    })
+    if (!ok) return
     const u = await api.patch<User>(`/api/users/${userId}/status`, { status: 'INACTIVE' })
     onUpdate(u)
   }

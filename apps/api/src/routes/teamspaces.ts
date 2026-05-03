@@ -59,6 +59,48 @@ teamspacesRouter.get('/', isAuth, async (req, res) => {
   }
 })
 
+// GET /api/teamspaces/:id — detail (members + projects)
+teamspacesRouter.get('/:id', isAuth, async (req, res) => {
+  const { userId, role } = req.user!
+  const isAdminUser = role === 'ADMIN'
+  try {
+    const ts = await prisma.teamspace.findUnique({
+      where: { id: req.params.id },
+      include: {
+        members: {
+          include: { user: { select: { id: true, name: true, email: true, area: true, avatarUrl: true, role: true } } },
+          orderBy: { joinedAt: 'asc' },
+        },
+        projects: {
+          where: { status: { not: 'COMPLETED' } },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, name: true, status: true, estimatedClose: true },
+        },
+      },
+    })
+    if (!ts) { res.status(404).json({ error: 'Teamspace no encontrado' }); return }
+
+    const isMember = ts.members.some(m => m.userId === userId)
+    if (ts.visibility === 'PRIVATE' && !isMember && !isAdminUser) {
+      res.status(403).json({ error: 'No tienes acceso a este teamspace' }); return
+    }
+
+    res.json({
+      id: ts.id,
+      name: ts.name,
+      emoji: ts.emoji,
+      description: (ts as { description?: string }).description ?? null,
+      visibility: ts.visibility,
+      isMember,
+      isAdmin: isAdminUser,
+      members: ts.members.map(m => m.user),
+      projects: ts.projects,
+    })
+  } catch (e) {
+    console.error(e); res.status(500).json({ error: 'Error al cargar teamspace' })
+  }
+})
+
 // POST /api/teamspaces — admin only
 teamspacesRouter.post('/', isAdmin, async (req, res) => {
   const { name, emoji, description, visibility } = req.body

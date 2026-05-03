@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { Client } from '@/types'
-import { CLIENT_STATUS_LABEL, CLIENT_STATUS_COLOR, CLIENT_TIER_LABEL, CLIENT_TIER_COLOR } from '@/lib/utils'
+import { CLIENT_STATUS_LABEL, CLIENT_STATUS_COLOR, CLIENT_TIER_LABEL, CLIENT_TIER_COLOR, clientBgColor } from '@/lib/utils'
 
 function monthsSince(date: string): string {
   const months = Math.floor((Date.now() - new Date(date).getTime()) / (1000 * 60 * 60 * 24 * 30.44))
@@ -13,12 +13,15 @@ function monthsSince(date: string): string {
 export function ClientCard({ client }: { client: Client }) {
   const isInactive = client.status === 'INACTIVE'
 
+  const bg = clientBgColor(client.id, client.color)
+
   return (
     <Link
       href={`/clients/${client.id}`}
-      className={`block bg-white rounded-xl border border-slate-200 px-5 py-4 hover:shadow-sm hover:border-slate-300 transition-all ${isInactive ? 'opacity-60' : ''}`}
+      className={`block bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-sm hover:border-slate-300 transition-all ${isInactive ? 'opacity-60' : ''}`}
     >
-      <div className="flex items-start justify-between gap-4">
+      <div className="h-1 w-full" style={{ backgroundColor: bg }} />
+      <div className="flex items-start justify-between gap-4 px-5 py-4">
         {/* Left: name, industry, contact */}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap mb-1">
@@ -67,3 +70,4 @@ export function ClientCard({ client }: { client: Client }) {
     </Link>
   )
 }
+

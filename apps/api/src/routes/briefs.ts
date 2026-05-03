@@ -12,7 +12,7 @@ const BRIEF_SELECT = {
   hashtags: true, technicalNotes: true, clientApprovalNotes: true,
   isRecurring: true, recurrenceFreq: true, createdAt: true, updatedAt: true,
   clientId: true,
-  client: { select: { id: true, name: true } },
+  client: { select: { id: true, name: true, color: true } },
   createdBy: { select: { id: true, name: true } },
   assignees: {
     include: { user: { select: { id: true, name: true, email: true, area: true, avatarUrl: true } } },
@@ -138,9 +138,8 @@ briefsRouter.patch('/:id/status', isAdminOrLead, async (req, res) => {
               assignees: { include: { user: { select: { email: true, name: true } } } } },
   })
   if (!prev) { res.status(404).json({ error: 'Brief no encontrado' }); return }
-  if (prev.status === 'entregado' || prev.status === 'cancelado') {
-    res.status(400).json({ error: 'Este brief ya no puede cambiar de estado' }); return
-  }
+  // Only truly locked if already at target status
+  // (entregado and cancelado can now be changed by admin)
 
   const brief = await prisma.contentBrief.update({
     where: { id: req.params.id },
@@ -249,4 +248,23 @@ briefsRouter.get('/:id/history', isAuth, async (req, res) => {
     orderBy: { createdAt: 'desc' },
   })
   res.json(history)
+})
+
+// ── DELETE /:id — delete brief (admin only) ───────────────────────────────────
+briefsRouter.delete('/:id', isAdminOrLead, async (req, res) => {
+  const brief = await prisma.contentBrief.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, title: true, status: true },
+  })
+  if (!brief) { res.status(404).json({ error: 'Brief no encontrado' }); return }
+
+  // Delete in order: history, approvals, assignees, then brief
+  await prisma.$transaction([
+    prisma.briefHistory.deleteMany({ where: { briefId: brief.id } }),
+    prisma.clientContentApproval.deleteMany({ where: { briefId: brief.id } }),
+    prisma.briefAssignee.deleteMany({ where: { briefId: brief.id } }),
+    prisma.contentBrief.delete({ where: { id: brief.id } }),
+  ])
+
+  res.json({ ok: true })
 })

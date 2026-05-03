@@ -28,10 +28,19 @@ interface Props {
   projectId: string
   isAdmin: boolean
   users?: User[]
+  onTasksChange?: (tasks: Task[]) => void
 }
 
-export function KanbanBoard({ initialTasks, projectId, isAdmin, users = [] }: Props) {
+export function KanbanBoard({ initialTasks, projectId, isAdmin, users = [], onTasksChange }: Props) {
   const [tasks, setTasks] = useState<Task[]>(initialTasks)
+
+  function syncTasks(updater: (prev: Task[]) => Task[]) {
+    setTasks(prev => {
+      const next = updater(prev)
+      onTasksChange?.(next)
+      return next
+    })
+  }
   const [activeTask, setActiveTask] = useState<Task | null>(null)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
@@ -51,31 +60,45 @@ export function KanbanBoard({ initialTasks, projectId, isAdmin, users = [] }: Pr
     if (!over) return
 
     const taskId = active.id as string
-    const newStatus = over.id as TaskStatus
+    const overId = over.id as string
 
     const validStatuses: TaskStatus[] = ['PENDING', 'IN_PROGRESS', 'IN_REVIEW', 'COMPLETED', 'BLOCKED']
-    if (!validStatuses.includes(newStatus)) return
+
+    // over.id puede ser el ID de una columna (status) o el ID de otra tarea
+    let newStatus: TaskStatus
+    if (validStatuses.includes(overId as TaskStatus)) {
+      newStatus = overId as TaskStatus
+    } else {
+      // Dropped sobre otra tarea → usar el status de esa tarea como columna destino
+      const overTask = tasks.find(t => t.id === overId)
+      if (!overTask) return
+      newStatus = overTask.status
+    }
 
     const task = tasks.find(t => t.id === taskId)
     if (!task || task.status === newStatus) return
 
     // Optimistic update
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t))
+    syncTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t))
 
     try {
       await api.patch(`/api/tasks/${taskId}/status`, { status: newStatus })
     } catch {
       // Revert on error
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: task.status } : t))
+      syncTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: task.status } : t))
     }
   }
 
   function onTaskUpdate(updated: Task) {
-    setTasks(prev => prev.map(t => t.id === updated.id ? updated : t))
+    syncTasks(prev => prev.map(t => t.id === updated.id ? updated : t))
   }
 
   function onTaskAdd(task: Task) {
-    setTasks(prev => [...prev, task])
+    syncTasks(prev => [...prev, task])
+  }
+
+  function onTaskDelete(id: string) {
+    syncTasks(prev => prev.filter(t => t.id !== id))
   }
 
   return (
@@ -91,6 +114,7 @@ export function KanbanBoard({ initialTasks, projectId, isAdmin, users = [] }: Pr
             users={users}
             onTaskUpdate={onTaskUpdate}
             onTaskAdd={onTaskAdd}
+            onTaskDelete={onTaskDelete}
           />
         ))}
       </div>

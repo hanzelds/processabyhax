@@ -155,6 +155,7 @@ export const BRIEF_STATUS_LABEL: Record<BriefStatus, string> = {
   aprobacion_cliente: 'Aprobación cliente',
   aprobado:           'Aprobado',
   en_produccion:      'En producción',
+  en_edicion:         'En edición',
   entregado:          'Entregado',
   cancelado:          'Cancelado',
 }
@@ -166,13 +167,14 @@ export const BRIEF_STATUS_COLOR: Record<BriefStatus, string> = {
   aprobacion_cliente: 'bg-orange-50 text-orange-700',
   aprobado:           'bg-teal-50 text-teal-700',
   en_produccion:      'bg-purple-50 text-purple-700',
+  en_edicion:         'bg-indigo-50 text-indigo-700',
   entregado:          'bg-emerald-50 text-emerald-700',
   cancelado:          'bg-red-50 text-red-600',
 }
 
 export const ALL_BRIEF_STATUSES: BriefStatus[] = [
   'idea','en_desarrollo','revision_interna','aprobacion_cliente',
-  'aprobado','en_produccion','entregado','cancelado',
+  'aprobado','en_produccion','en_edicion','entregado','cancelado',
 ]
 
 export const PIECE_STATUS_LABEL: Record<ContentPieceStatus, string> = {
@@ -180,6 +182,7 @@ export const PIECE_STATUS_LABEL: Record<ContentPieceStatus, string> = {
   programado: 'Programado',
   publicado:  'Publicado',
   en_revision:'En revisión',
+  en_edicion: 'En edición',
   pausado:    'Pausado',
   cancelado:  'Cancelado',
 }
@@ -189,6 +192,7 @@ export const PIECE_STATUS_COLOR: Record<ContentPieceStatus, string> = {
   programado: 'bg-purple-50 text-purple-700',
   publicado:  'bg-emerald-50 text-emerald-700',
   en_revision:'bg-yellow-50 text-yellow-700',
+  en_edicion: 'bg-indigo-50 text-indigo-700',
   pausado:    'bg-slate-100 text-slate-500',
   cancelado:  'bg-red-50 text-red-600',
 }
@@ -198,6 +202,7 @@ export const PIECE_STATUS_DOT: Record<ContentPieceStatus, string> = {
   programado: 'bg-purple-500',
   publicado:  'bg-emerald-500',
   en_revision:'bg-yellow-400',
+  en_edicion: 'bg-indigo-400',
   pausado:    'bg-slate-400',
   cancelado:  'bg-red-400',
 }
@@ -269,13 +274,58 @@ export const PLATFORM_OPTIONS: { value: ContentPlatform; label: string }[] = [
   { value: 'youtube',   label: 'YouTube' },
 ]
 
-// Assign a consistent color to a client based on their ID
-const CLIENT_PALETTE = [
-  'bg-blue-500','bg-violet-500','bg-rose-500','bg-amber-500',
-  'bg-teal-500','bg-cyan-500','bg-indigo-500','bg-pink-500',
+// ── Client colors ─────────────────────────────────────────────────────────────
+
+export const CLIENT_COLOR_PALETTE = [
+  '#3b82f6', // blue
+  '#8b5cf6', // violet
+  '#f43f5e', // rose
+  '#f59e0b', // amber
+  '#14b8a6', // teal
+  '#06b6d4', // cyan
+  '#6366f1', // indigo
+  '#ec4899', // pink
+  '#10b981', // emerald
+  '#ef4444', // red
+  '#f97316', // orange
+  '#0ea5e9', // sky
+  '#a855f7', // purple
+  '#17394f', // brand
+  '#64748b', // slate
+  '#84cc16', // lime
 ]
-export function clientColor(id: string): string {
+
+/** Returns the client's stored hex color, or a consistent hash-based fallback */
+export function clientBgColor(id: string | undefined | null, color?: string | null): string {
+  if (color) return color
+  if (!id) return CLIENT_COLOR_PALETTE[0]
   let hash = 0
   for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash)
-  return CLIENT_PALETTE[Math.abs(hash) % CLIENT_PALETTE.length]
+  return CLIENT_COLOR_PALETTE[Math.abs(hash) % CLIENT_COLOR_PALETTE.length]
+}
+
+/**
+ * Returns true if the hex color is perceptually light and should use dark text.
+ * Uses the ITU-R BT.601 luminance formula.
+ */
+export function isLightColor(hex: string): boolean {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+  return luminance > 0.55
+}
+
+/** @deprecated use clientBgColor with inline style instead */
+export function clientColor(id: string | undefined | null): string {
+  const hex = clientBgColor(id)
+  const MAP: Record<string, string> = {
+    '#3b82f6': 'bg-blue-500', '#8b5cf6': 'bg-violet-500', '#f43f5e': 'bg-rose-500',
+    '#f59e0b': 'bg-amber-500', '#14b8a6': 'bg-teal-500', '#06b6d4': 'bg-cyan-500',
+    '#6366f1': 'bg-indigo-500', '#ec4899': 'bg-pink-500', '#10b981': 'bg-emerald-500',
+    '#ef4444': 'bg-red-500', '#f97316': 'bg-orange-500', '#0ea5e9': 'bg-sky-500',
+    '#a855f7': 'bg-purple-500', '#17394f': 'bg-[#17394f]', '#64748b': 'bg-slate-500',
+    '#84cc16': 'bg-lime-500',
+  }
+  return MAP[hex] ?? 'bg-blue-500'
 }

@@ -1,6 +1,17 @@
 import { Resend } from 'resend'
+import { getSettings, emailEnabled } from './settings'
 
-const resend  = new Resend(process.env.RESEND_API_KEY)
+const resend = new Resend(process.env.RESEND_API_KEY)
+
+async function getEmailConfig() {
+  const s = await getSettings()
+  return {
+    FROM:    s.email_from || process.env.EMAIL_FROM || 'Processa by Hax <noreply@hax.com.do>',
+    APP_URL: s.app_url    || process.env.APP_URL    || 'https://processa.hax.com.do',
+  }
+}
+
+// Keep module-level constants as fallback for sync code that builds templates
 const FROM    = process.env.EMAIL_FROM || 'Processa by Hax <noreply@hax.com.do>'
 const APP_URL = process.env.APP_URL   || 'https://processa.hax.com.do'
 
@@ -98,12 +109,14 @@ function linkFallback(url: string): string {
 // ── Send invitation ───────────────────────────────────────────────────────────
 
 export async function sendInvitationEmail(to: string, name: string, token: string): Promise<void> {
-  const link = `${APP_URL}/accept-invitation?token=${token}`
+  const cfg = await getEmailConfig()
+  const link = `${cfg.APP_URL}/accept-invitation?token=${token}`
 
   if (!process.env.RESEND_API_KEY) {
     console.log(`[EMAIL] Invitation for ${name} (${to})\nLink: ${link}`)
     return
   }
+  if (!await emailEnabled()) return
 
   const html = EMAIL_WRAPPER_OPEN
     + h1(`Hola, ${name.split(' ')[0]} 👋`)
@@ -115,7 +128,7 @@ export async function sendInvitationEmail(to: string, name: string, token: strin
     + EMAIL_WRAPPER_CLOSE
 
   const { error } = await resend.emails.send({
-    from: FROM, to,
+    from: cfg.FROM, to,
     subject: 'Te invitaron a Processa · Hax Estudio Creativo',
     html,
   })
@@ -125,12 +138,14 @@ export async function sendInvitationEmail(to: string, name: string, token: strin
 // ── Password reset ────────────────────────────────────────────────────────────
 
 export async function sendPasswordResetEmail(to: string, name: string, token: string): Promise<void> {
-  const link = `${APP_URL}/reset-password?token=${token}`
+  const cfg = await getEmailConfig()
+  const link = `${cfg.APP_URL}/reset-password?token=${token}`
 
   if (!process.env.RESEND_API_KEY) {
     console.log(`[EMAIL] Password reset for ${name} (${to})\nLink: ${link}`)
     return
   }
+  if (!await emailEnabled()) return
 
   const html = EMAIL_WRAPPER_OPEN
     + h1('Restablecer contraseña')
@@ -142,7 +157,7 @@ export async function sendPasswordResetEmail(to: string, name: string, token: st
     + EMAIL_WRAPPER_CLOSE
 
   const { error } = await resend.emails.send({
-    from: FROM, to,
+    from: cfg.FROM, to,
     subject: 'Recuperación de contraseña · Processa',
     html,
   })
@@ -162,8 +177,10 @@ export async function sendTaskAssignedEmail(params: {
   dueDate?: Date | null
   projectId: string
 }): Promise<void> {
+  if (!await emailEnabled('notify_task_assigned')) return
+  const cfg = await getEmailConfig()
   const { to, recipientName, assignerName, taskTitle, taskTypeLabel, projectName, clientName, dueDate, projectId } = params
-  const link = `${APP_URL}/projects/${projectId}`
+  const link = `${cfg.APP_URL}/projects/${projectId}`
 
   if (!process.env.RESEND_API_KEY) {
     console.log(`[EMAIL] Task assigned → ${to}: "${taskTitle}" in ${projectName}`)
@@ -186,7 +203,7 @@ export async function sendTaskAssignedEmail(params: {
     + EMAIL_WRAPPER_CLOSE
 
   const { error } = await resend.emails.send({
-    from: FROM, to,
+    from: cfg.FROM, to,
     subject: `Nueva tarea: ${taskTitle}`,
     html,
   })
@@ -229,10 +246,12 @@ export async function sendTaskStatusChangedEmail(params: {
   toStatus: string
   projectId: string
 }): Promise<void> {
+  if (!await emailEnabled('notify_task_status')) return
+  const cfg = await getEmailConfig()
   const { adminEmails, changerName, taskTitle, projectName, clientName, fromStatus, toStatus, projectId } = params
   if (adminEmails.length === 0) return
 
-  const link       = `${APP_URL}/projects/${projectId}`
+  const link       = `${cfg.APP_URL}/projects/${projectId}`
   const fromLabel  = STATUS_LABEL[fromStatus]  ?? fromStatus
   const toLabel    = STATUS_LABEL[toStatus]    ?? toStatus
   const toColor    = STATUS_COLOR[toStatus]    ?? '#64748b'
@@ -270,7 +289,7 @@ export async function sendTaskStatusChangedEmail(params: {
     + EMAIL_WRAPPER_CLOSE
 
   const { error } = await resend.emails.send({
-    from: FROM, to: adminEmails,
+    from: cfg.FROM, to: adminEmails,
     subject: `${taskTitle} → ${toLabel}`,
     html,
   })
@@ -287,9 +306,11 @@ export async function sendBriefAssignedEmail(params: {
   to: string; recipientName: string; assignerName: string;
   briefTitle: string; role: string; clientName: string;
 }): Promise<void> {
-  const { to, recipientName, assignerName, briefTitle, role, clientName } = params
+  if (!await emailEnabled('notify_brief_assigned')) return
   if (!process.env.RESEND_API_KEY) return
-  const link = `${APP_URL}/content/briefs`
+  const cfg = await getEmailConfig()
+  const { to, recipientName, assignerName, briefTitle, role, clientName } = params
+  const link = `${cfg.APP_URL}/content/briefs`
   const html = EMAIL_WRAPPER_OPEN
     + h1(`Hola, ${recipientName.split(' ')[0]} 👋`)
     + p(`<strong style="color:#17394f;">${assignerName}</strong> te asignó a un brief de contenido como <strong>${BRIEF_ROLE_LABEL[role] ?? role}</strong>:`)
@@ -300,7 +321,7 @@ export async function sendBriefAssignedEmail(params: {
       ])
     + btn(link, 'Ver preproducción')
     + EMAIL_WRAPPER_CLOSE
-  const { error } = await resend.emails.send({ from: FROM, to, subject: `Nueva asignación de contenido — ${briefTitle}`, html })
+  const { error } = await resend.emails.send({ from: cfg.FROM, to, subject: `Nueva asignación de contenido — ${briefTitle}`, html })
   if (error) console.error('[EMAIL] Brief assigned error:', error)
 }
 
@@ -316,9 +337,11 @@ export async function sendBriefStatusEmail(params: {
   brief: { id: string; title: string; client: { name: string }; assignees: { user: { email: string; name: string } }[] };
   status: string; actor: string;
 }): Promise<void> {
-  const { brief, status, actor } = params
+  if (!await emailEnabled('notify_brief_status')) return
   if (!process.env.RESEND_API_KEY) return
-  const link = `${APP_URL}/content/briefs`
+  const cfg = await getEmailConfig()
+  const { brief, status, actor } = params
+  const link = `${cfg.APP_URL}/content/briefs`
   const label = BRIEF_STATUS_LABEL[status] ?? status
 
   let to: string[] = []
@@ -343,7 +366,7 @@ export async function sendBriefStatusEmail(params: {
       ])
     + btn(link, 'Ver en Processa')
     + EMAIL_WRAPPER_CLOSE
-  const { error } = await resend.emails.send({ from: FROM, to, subject: `Brief ${label} — ${brief.title}`, html })
+  const { error } = await resend.emails.send({ from: cfg.FROM, to, subject: `Brief ${label} — ${brief.title}`, html })
   if (error) console.error('[EMAIL] Brief status error:', error)
 }
 
@@ -353,8 +376,11 @@ export async function sendPieceScheduledEmail(params: {
   adminEmails: string[]; pieceTitle: string; clientName: string;
   scheduledDate: string; scheduledTime: string | null;
 }): Promise<void> {
+  if (!await emailEnabled('notify_piece_scheduled')) return
+  if (!process.env.RESEND_API_KEY) return
+  const cfg = await getEmailConfig()
   const { adminEmails, pieceTitle, clientName, scheduledDate, scheduledTime } = params
-  if (!adminEmails.length || !process.env.RESEND_API_KEY) return
+  if (!adminEmails.length) return
   const dateStr = new Date(scheduledDate).toLocaleDateString('es-DO', { weekday: 'long', day: 'numeric', month: 'long' })
   const html = EMAIL_WRAPPER_OPEN
     + h1('Pieza programada 📅')
@@ -367,7 +393,7 @@ export async function sendPieceScheduledEmail(params: {
       ])
     + btn(`${APP_URL}/content/calendar`, 'Ver calendario')
     + EMAIL_WRAPPER_CLOSE
-  const { error } = await resend.emails.send({ from: FROM, to: adminEmails, subject: `Programado — ${pieceTitle} · ${dateStr}`, html })
+  const { error } = await resend.emails.send({ from: cfg.FROM, to: adminEmails, subject: `Programado — ${pieceTitle} · ${dateStr}`, html })
   if (error) console.error('[EMAIL] Piece scheduled error:', error)
 }
 
@@ -376,8 +402,11 @@ export async function sendPieceScheduledEmail(params: {
 export async function sendPiecePublishedEmail(params: {
   adminEmails: string[]; pieceTitle: string; clientName: string; publisherName: string;
 }): Promise<void> {
+  if (!await emailEnabled('notify_piece_published')) return
+  if (!process.env.RESEND_API_KEY) return
+  const cfg = await getEmailConfig()
   const { adminEmails, pieceTitle, clientName, publisherName } = params
-  if (!adminEmails.length || !process.env.RESEND_API_KEY) return
+  if (!adminEmails.length) return
   const html = EMAIL_WRAPPER_OPEN
     + h1('Contenido publicado ✅')
     + p(`<strong style="color:#17394f;">${publisherName}</strong> marcó una pieza como publicada:`)
@@ -387,7 +416,7 @@ export async function sendPiecePublishedEmail(params: {
       ])
     + btn(`${APP_URL}/content/calendar`, 'Ver calendario')
     + EMAIL_WRAPPER_CLOSE
-  const { error } = await resend.emails.send({ from: FROM, to: adminEmails, subject: `Publicado — ${pieceTitle}`, html })
+  const { error } = await resend.emails.send({ from: cfg.FROM, to: adminEmails, subject: `Publicado — ${pieceTitle}`, html })
   if (error) console.error('[EMAIL] Piece published error:', error)
 }
 
@@ -396,8 +425,11 @@ export async function sendPiecePublishedEmail(params: {
 export async function sendCopyAlertEmail(params: {
   adminEmails: string[]; pieceTitle: string; clientName: string; scheduledDate: string;
 }): Promise<void> {
+  if (!await emailEnabled('notify_copy_alert')) return
+  if (!process.env.RESEND_API_KEY) return
+  const cfg = await getEmailConfig()
   const { adminEmails, pieceTitle, clientName, scheduledDate } = params
-  if (!adminEmails.length || !process.env.RESEND_API_KEY) return
+  if (!adminEmails.length) return
   const dateStr = new Date(scheduledDate).toLocaleDateString('es-DO', { weekday: 'long', day: 'numeric', month: 'long' })
   const html = EMAIL_WRAPPER_OPEN
     + h1('⚠️ Copy pendiente — publicación en 48h')
@@ -410,6 +442,263 @@ export async function sendCopyAlertEmail(params: {
       ])
     + btn(`${APP_URL}/content/calendar`, 'Ver en calendario')
     + EMAIL_WRAPPER_CLOSE
-  const { error } = await resend.emails.send({ from: FROM, to: adminEmails, subject: `⚠️ Copy pendiente — ${pieceTitle} se publica ${dateStr}`, html })
+  const { error } = await resend.emails.send({ from: cfg.FROM, to: adminEmails, subject: `⚠️ Copy pendiente — ${pieceTitle} se publica ${dateStr}`, html })
   if (error) console.error('[EMAIL] Copy alert error:', error)
+}
+
+// ── Portal de Cliente ─────────────────────────────────────────────────────────
+
+export async function sendPortalLinkEmail(params: {
+  to: string
+  clientName: string
+  month: string      // 'Junio 2025'
+  portalUrl: string
+}): Promise<void> {
+  const cfg = await getEmailConfig()
+  if (!await emailEnabled('email_portal_link')) return
+  const { to, clientName, month, portalUrl } = params
+  const html = EMAIL_WRAPPER_OPEN
+    + h1(`Tu portal de contenido — ${month}`)
+    + p(`Hola <strong>${clientName}</strong>,`)
+    + p(`Tu equipo de Hax ha preparado el contenido del mes de <strong>${month}</strong>. Desde tu portal puedes revisar cada pieza, aprobar las que estén listas y solicitar ajustes con comentarios directos.`)
+    + btn(portalUrl, 'Ver mi portal de contenido')
+    + card([
+        cardRow('Acceso', 'Sin contraseña — el link te da acceso directo'),
+        cardRow('Válido', `Hasta fin de mes`),
+        cardRow('Desde', 'Cualquier dispositivo, incluyendo tu teléfono'),
+      ])
+    + p(`Si el botón no funciona, copia este link en tu navegador:`)
+    + linkFallback(portalUrl)
+    + EMAIL_WRAPPER_CLOSE
+  const { error } = await resend.emails.send({ from: cfg.FROM, to, subject: `Tu portal de contenido ${month} — Hax`, html })
+  if (error) console.error('[EMAIL] Portal link error:', error)
+}
+
+export async function sendClientApprovedEmail(params: {
+  adminEmails: string[]
+  clientName: string
+  pieceName: string
+  month: string
+  portalUrl: string
+}): Promise<void> {
+  const cfg = await getEmailConfig()
+  if (!await emailEnabled('email_portal_approval')) return
+  const { adminEmails, clientName, pieceName, month, portalUrl } = params
+  if (!adminEmails.length) return
+  const html = EMAIL_WRAPPER_OPEN
+    + h1('✅ Aprobación recibida del cliente')
+    + p(`<strong>${clientName}</strong> ha aprobado una pieza de contenido desde su portal:`)
+    + card([
+        cardRow('Pieza', pieceName),
+        cardRow('Cliente', clientName),
+        cardRow('Mes', month),
+        cardRow('Estado', '<span style="color:#16a34a;font-weight:700;">Aprobado ✓</span>'),
+      ])
+    + btn(portalUrl, 'Ver en Processa')
+    + EMAIL_WRAPPER_CLOSE
+  const { error } = await resend.emails.send({ from: cfg.FROM, to: adminEmails, subject: `✅ ${clientName} aprobó — ${pieceName}`, html })
+  if (error) console.error('[EMAIL] Client approved error:', error)
+}
+
+export async function sendClientChangesEmail(params: {
+  adminEmails: string[]
+  clientName: string
+  pieceName: string
+  changeType: string | null
+  feedback: string | null
+  month: string
+  portalUrl: string
+}): Promise<void> {
+  const cfg = await getEmailConfig()
+  if (!await emailEnabled('email_portal_changes')) return
+  const { adminEmails, clientName, pieceName, changeType, feedback, month, portalUrl } = params
+  if (!adminEmails.length) return
+  const changeLabels: Record<string, string> = {
+    copy: 'Copy / Caption', design: 'Diseño visual', date: 'Fecha u hora',
+    concept: 'Idea / Concepto', other: 'Otro',
+  }
+  const changeLabel = changeType ? (changeLabels[changeType] ?? changeType) : null
+  const html = EMAIL_WRAPPER_OPEN
+    + h1('✏️ Cambios solicitados por el cliente')
+    + p(`<strong>${clientName}</strong> ha solicitado ajustes en una pieza de contenido:`)
+    + card([
+        cardRow('Pieza', pieceName),
+        cardRow('Cliente', clientName),
+        cardRow('Mes', month),
+        ...(changeLabel ? [cardRow('Tipo de cambio', `<strong>${changeLabel}</strong>`)] : []),
+        ...(feedback ? [cardRow('Comentario', `<em style="color:#374151;">"${feedback}"</em>`)] : []),
+      ])
+    + btn(portalUrl, 'Ver en Processa')
+    + EMAIL_WRAPPER_CLOSE
+  const { error } = await resend.emails.send({ from: cfg.FROM, to: adminEmails, subject: `✏️ ${clientName} solicitó cambios — ${pieceName}`, html })
+  if (error) console.error('[EMAIL] Client changes error:', error)
+}
+
+export async function sendPortalExpiryReminderEmail(params: {
+  to: string
+  clientName: string
+  month: string
+  portalUrl: string
+  pendingCount: number
+  daysLeft: number
+}): Promise<void> {
+  const cfg = await getEmailConfig()
+  if (!await emailEnabled('email_portal_expiry')) return
+  const { to, clientName, month, portalUrl, pendingCount, daysLeft } = params
+  const html = EMAIL_WRAPPER_OPEN
+    + h1(`⏰ Tu portal vence en ${daysLeft} días`)
+    + p(`Hola <strong>${clientName}</strong>,`)
+    + p(`Tu portal de contenido de <strong>${month}</strong> vence pronto y todavía tienes <strong>${pendingCount} pieza${pendingCount !== 1 ? 's' : ''}</strong> esperando tu revisión.`)
+    + btn(portalUrl, 'Revisar contenido ahora')
+    + card([
+        cardRow('Pendientes', `${pendingCount} pieza${pendingCount !== 1 ? 's' : ''} sin aprobar`),
+        cardRow('Vence en', `${daysLeft} días`),
+      ])
+    + EMAIL_WRAPPER_CLOSE
+  const { error } = await resend.emails.send({ from: cfg.FROM, to, subject: `⏰ Tu portal vence en ${daysLeft} días — ${pendingCount} piezas pendientes`, html })
+  if (error) console.error('[EMAIL] Portal expiry reminder error:', error)
+}
+
+export async function sendAllApprovedEmail(params: {
+  adminEmails: string[]
+  clientName: string
+  month: string
+  totalPieces: number
+}): Promise<void> {
+  const cfg = await getEmailConfig()
+  if (!await emailEnabled('email_portal_all_approved')) return
+  const { adminEmails, clientName, month, totalPieces } = params
+  if (!adminEmails.length) return
+  const html = EMAIL_WRAPPER_OPEN
+    + h1('🎉 Todo el contenido aprobado')
+    + p(`<strong>${clientName}</strong> ha aprobado todas las piezas de <strong>${month}</strong>.`)
+    + card([
+        cardRow('Cliente', clientName),
+        cardRow('Mes', month),
+        cardRow('Piezas aprobadas', `${totalPieces} en total`),
+        cardRow('Estado', '<span style="color:#16a34a;font-weight:700;">✓ Cierre mensual completo</span>'),
+      ])
+    + EMAIL_WRAPPER_CLOSE
+  const { error } = await resend.emails.send({ from: cfg.FROM, to: adminEmails, subject: `🎉 ${clientName} — todo aprobado en ${month}`, html })
+  if (error) console.error('[EMAIL] All approved error:', error)
+}
+
+// ── Brief Comments ─────────────────────────────────────────────────────────────
+
+type BriefRef   = { id: string; title: string; client: { name: string } }
+type CommentRef = { id: string; content: string }
+type UserRef    = { email: string; name: string }
+
+function commentQuote(content: string): string {
+  const snippet = content.length > 300 ? content.slice(0, 300) + '…' : content
+  return `<blockquote style="margin:16px 0;padding:12px 16px;background:#f8fafc;border-left:3px solid #17394f;border-radius:0 8px 8px 0;">
+    <p style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;color:#475569;line-height:1.6;margin:0;">${snippet.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')}</p>
+  </blockquote>`
+}
+
+export async function sendCommentNewEmail(params: {
+  brief: BriefRef; comment: CommentRef; actorName: string
+  recipients: UserRef[]
+}): Promise<void> {
+  if (!await emailEnabled('notify_brief_comment')) return
+  if (!process.env.RESEND_API_KEY || !params.recipients.length) return
+  const cfg = await getEmailConfig()
+  const { brief, comment, actorName, recipients } = params
+  const link = `${cfg.APP_URL}/content/briefs`
+  const to = recipients.map(r => r.email)
+  const html = EMAIL_WRAPPER_OPEN
+    + h1(`Nuevo comentario en "${brief.title}"`)
+    + p(`<strong style="color:#17394f;">${actorName}</strong> dejó un comentario:`)
+    + commentQuote(comment.content)
+    + card([cardRow('Brief', brief.title), cardRow('Cliente', brief.client.name)])
+    + btn(link, 'Ver en Processa')
+    + EMAIL_WRAPPER_CLOSE
+  const { error } = await resend.emails.send({ from: cfg.FROM, to, subject: `Nuevo comentario en "${brief.title}"` , html })
+  if (error) console.error('[EMAIL] Comment new error:', error)
+}
+
+export async function sendCommentMentionEmail(params: {
+  brief: BriefRef; comment: CommentRef; actorName: string
+  mentionedUsers: UserRef[]
+}): Promise<void> {
+  if (!await emailEnabled('notify_brief_comment')) return
+  if (!process.env.RESEND_API_KEY || !params.mentionedUsers.length) return
+  const cfg = await getEmailConfig()
+  const { brief, comment, actorName, mentionedUsers } = params
+  const link = `${cfg.APP_URL}/content/briefs`
+
+  for (const user of mentionedUsers) {
+    const html = EMAIL_WRAPPER_OPEN
+      + h1(`Te mencionaron en "${brief.title}"`)
+      + p(`<strong style="color:#17394f;">${actorName}</strong> te mencionó en un comentario:`)
+      + commentQuote(comment.content)
+      + card([cardRow('Brief', brief.title), cardRow('Cliente', brief.client.name)])
+      + btn(link, 'Ver en Processa')
+      + EMAIL_WRAPPER_CLOSE
+    const { error } = await resend.emails.send({ from: cfg.FROM, to: user.email, subject: `Te mencionaron en "${brief.title}"`, html })
+    if (error) console.error('[EMAIL] Comment mention error:', error)
+  }
+}
+
+export async function sendCommentReplyEmail(params: {
+  brief: BriefRef; comment: CommentRef; actorName: string; parentAuthor: UserRef
+}): Promise<void> {
+  if (!await emailEnabled('notify_brief_comment')) return
+  if (!process.env.RESEND_API_KEY) return
+  const cfg = await getEmailConfig()
+  const { brief, comment, actorName, parentAuthor } = params
+  const link = `${cfg.APP_URL}/content/briefs`
+  const html = EMAIL_WRAPPER_OPEN
+    + h1(`${actorName} respondió tu comentario`)
+    + p(`Respondió a tu comentario en el brief <strong>${brief.title}</strong>:`)
+    + commentQuote(comment.content)
+    + card([cardRow('Brief', brief.title), cardRow('Cliente', brief.client.name)])
+    + btn(link, 'Ver en Processa')
+    + EMAIL_WRAPPER_CLOSE
+  const { error } = await resend.emails.send({ from: cfg.FROM, to: parentAuthor.email, subject: `${actorName} respondió tu comentario en "${brief.title}"`, html })
+  if (error) console.error('[EMAIL] Comment reply error:', error)
+}
+
+export async function sendCommentResolvedEmail(params: {
+  brief: BriefRef; comment: CommentRef; actorName: string; commentAuthor: UserRef
+}): Promise<void> {
+  if (!await emailEnabled('notify_brief_comment')) return
+  if (!process.env.RESEND_API_KEY) return
+  const cfg = await getEmailConfig()
+  const { brief, comment, actorName, commentAuthor } = params
+  const link = `${cfg.APP_URL}/content/briefs`
+  const html = EMAIL_WRAPPER_OPEN
+    + h1(`Tu comentario fue marcado como resuelto`)
+    + p(`<strong style="color:#17394f;">${actorName}</strong> marcó como resuelto tu comentario en <strong>${brief.title}</strong>:`)
+    + commentQuote(comment.content)
+    + btn(link, 'Ver en Processa')
+    + EMAIL_WRAPPER_CLOSE
+  const { error } = await resend.emails.send({ from: cfg.FROM, to: commentAuthor.email, subject: `Tu comentario en "${brief.title}" fue resuelto`, html })
+  if (error) console.error('[EMAIL] Comment resolved error:', error)
+}
+
+export async function sendCommentOnStatusChangeEmail(params: {
+  brief: BriefRef; comment: CommentRef; actorName: string
+  newStatus: string; recipients: UserRef[]
+}): Promise<void> {
+  if (!await emailEnabled('notify_brief_comment')) return
+  if (!process.env.RESEND_API_KEY || !params.recipients.length) return
+  const cfg = await getEmailConfig()
+  const { brief, comment, actorName, newStatus, recipients } = params
+  const link = `${cfg.APP_URL}/content/briefs`
+  const STATUS_LABEL: Record<string, string> = {
+    revision_interna: 'Revisión interna', aprobacion_cliente: 'Aprobación cliente',
+    aprobado: 'Aprobado', en_produccion: 'En producción',
+  }
+  const label = STATUS_LABEL[newStatus] ?? newStatus
+  const to = recipients.map(r => r.email)
+  const html = EMAIL_WRAPPER_OPEN
+    + h1(`${actorName} dejó una nota al mover a "${label}"`)
+    + p(`El brief <strong>${brief.title}</strong> fue movido a <strong>${label}</strong> con la siguiente nota:`)
+    + commentQuote(comment.content)
+    + card([cardRow('Brief', brief.title), cardRow('Cliente', brief.client.name), cardRow('Nuevo estado', label)])
+    + btn(link, 'Ver en Processa')
+    + EMAIL_WRAPPER_CLOSE
+  const { error } = await resend.emails.send({ from: cfg.FROM, to, subject: `Nota al mover "${brief.title}" a ${label}`, html })
+  if (error) console.error('[EMAIL] Comment on status change error:', error)
 }

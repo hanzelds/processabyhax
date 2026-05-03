@@ -9,7 +9,7 @@ import { User } from '@/types'
 import { SidebarTeamspaces } from './SidebarTeamspaces'
 import {
   CheckSquare, FolderKanban, Users, Building2,
-  Settings, LogOut, ChevronLeft, ChevronRight, CalendarDays, Clapperboard, type LucideIcon,
+  Settings, LogOut, ChevronLeft, ChevronRight, CalendarDays, Clapperboard, SlidersHorizontal, BookOpen, type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -109,23 +109,29 @@ function SectionLabel({ label, collapsed }: { label: string; collapsed: boolean 
 
 // ── Nav sections config ───────────────────────────────────────────────────────
 
-function getNavSections(role: string) {
+function getNavSections(role: string, permissions: string[]) {
+  const isTeam = role === 'TEAM'
+  const canSeeCalendar    = !isTeam || permissions.includes('content.calendar')
+  const canSeePreproduccion = !isTeam || permissions.includes('content.preproduccion')
+  const contentItems = [
+    ...(canSeeCalendar     ? [{ href: '/content/calendar', label: 'Calendario',    icon: CalendarDays, hasBadge: false }] : []),
+    ...(canSeePreproduccion ? [{ href: '/content/briefs',  label: 'Preproducción', icon: Clapperboard, hasBadge: false }] : []),
+    { href: '/docs', label: 'Docs', icon: BookOpen, hasBadge: false },
+  ]
+
   const sections = [
     {
       title: 'Principal',
       items: [
-        { href: '/dashboard', label: 'Mis tareas', icon: CheckSquare,   hasBadge: true },
-        { href: '/projects',  label: 'Proyectos',  icon: FolderKanban,  hasBadge: false },
+        { href: '/dashboard', label: 'Mis tareas', icon: CheckSquare,  hasBadge: true },
+        { href: '/projects',  label: 'Proyectos',  icon: FolderKanban, hasBadge: false },
       ],
     },
-    ...(role !== 'TEAM' ? [{
+    ...(contentItems.length > 0 ? [{
       title: 'Contenido',
-      items: [
-        { href: '/content/calendar', label: 'Calendario',    icon: CalendarDays,  hasBadge: false },
-        { href: '/content/briefs',   label: 'Preproducción', icon: Clapperboard,  hasBadge: false },
-      ],
+      items: contentItems,
     }] : []),
-    ...(role !== 'TEAM' ? [{
+    ...(!isTeam ? [{
       title: 'Clientes',
       items: [
         { href: '/clients',     label: 'Clientes', icon: Building2, hasBadge: false },
@@ -163,7 +169,7 @@ export function Sidebar({
   }
 
   const initials = user.name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()
-  const sections = getNavSections(user.role)
+  const sections = getNavSections(user.role, user.permissions ?? [])
 
   const sidebarInner = (
     <aside
@@ -246,6 +252,12 @@ export function Sidebar({
               badge={adminAlerts}
               badgeAlert={adminAlerts > 0}
             />
+            <NavItem
+              href="/admin/system"
+              label="Sistema"
+              icon={SlidersHorizontal}
+              collapsed={collapsed}
+            />
           </div>
         )}
       </nav>
@@ -270,6 +282,13 @@ export function Sidebar({
                 {user.area ? ` · ${user.area}` : ''}
               </p>
             </div>
+            <Link
+              href="/settings"
+              title="Configuración"
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-300 hover:text-gray-600 hover:bg-gray-50 transition-all shrink-0"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+            </Link>
             <button
               onClick={logout}
               title="Cerrar sesión"
@@ -289,6 +308,13 @@ export function Sidebar({
                 : initials
               }
             </div>
+            <Link
+              href="/settings"
+              title="Configuración"
+              className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-300 hover:text-gray-600 hover:bg-gray-50 transition-all"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+            </Link>
             <button
               onClick={logout}
               title="Cerrar sesión"

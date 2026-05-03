@@ -5,6 +5,7 @@ import { User, Skill, Role } from '@/types'
 import { USER_ROLE_LABEL, USER_STATUS_LABEL, USER_STATUS_COLOR, formatDate } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { useRouter } from 'next/navigation'
+import { useToast } from '@/components/ui/Toast'
 
 const AREAS = [
   'Diseño gráfico', 'Dirección de arte', 'Motion & video', 'Fotografía',
@@ -21,6 +22,7 @@ interface Props {
 }
 
 export function UserProfileTab({ user: initialUser, skills: initialSkills, isAdmin, isOwnProfile, onUpdate }: Props) {
+  const toast   = useToast()
   const [user, setUser]     = useState(initialUser)
   const [skills, setSkills] = useState(initialSkills)
   const [editing, setEditing] = useState(false)
@@ -62,7 +64,7 @@ export function UserProfileTab({ user: initialUser, skills: initialSkills, isAdm
       onUpdate(updated)
       setEditing(false)
       router.refresh()
-    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Error') }
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Error al guardar') }
     finally { setSaving(false) }
   }
 
@@ -77,7 +79,7 @@ export function UserProfileTab({ user: initialUser, skills: initialSkills, isAdm
       if (!res.ok) throw new Error(data.error)
       setUser(u => ({ ...u, avatarUrl: data.avatarUrl }))
       onUpdate({ ...user, avatarUrl: data.avatarUrl })
-    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Error al subir avatar') }
+    } catch (e: unknown) { toast.error(e instanceof Error ? e.message : 'Error al subir avatar') }
   }
 
   async function loadSkillSuggestions(q: string) {

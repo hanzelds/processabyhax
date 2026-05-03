@@ -7,7 +7,9 @@ import {
   CONTENT_TYPE_OPTIONS, PLATFORM_OPTIONS,
 } from '@/lib/utils'
 import { api } from '@/lib/api'
-import { X, CheckCircle, Plus } from 'lucide-react'
+import { X, CheckCircle, Plus, Trash2 } from 'lucide-react'
+import { useToast } from '@/components/ui/Toast'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
 
 const INPUT = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#17394f]/20'
 const LABEL = 'text-xs font-semibold text-slate-500 mb-1 block uppercase tracking-wide'
@@ -22,11 +24,14 @@ interface Props {
   isAdmin: boolean
   onUpdate: (p: ContentPiece) => void
   onCreate?: (p: ContentPiece) => void
+  onDelete?: (id: string) => void
   onClose: () => void
 }
 
-export function PieceModal({ piece, defaultDate, clients, isAdmin, onUpdate, onCreate, onClose }: Props) {
+export function PieceModal({ piece, defaultDate, clients, isAdmin, onUpdate, onCreate, onDelete, onClose }: Props) {
   const isNew = !piece
+  const toast   = useToast()
+  const confirm = useConfirm()
 
   const [title, setTitle]         = useState(piece?.title ?? '')
   const [clientId, setClientId]   = useState(piece?.clientId ?? '')
@@ -44,6 +49,7 @@ export function PieceModal({ piece, defaultDate, clients, isAdmin, onUpdate, onC
   const [saving, setSaving]       = useState(false)
   const [publishing, setPublishing] = useState(false)
   const [scheduling, setScheduling] = useState(false)
+  const [deleting, setDeleting]   = useState(false)
   const [tab, setTab]             = useState<'info'|'copy'|'historial'>('info')
 
   function togglePlatform(p: ContentPlatform) {
@@ -108,6 +114,25 @@ export function PieceModal({ piece, defaultDate, clients, isAdmin, onUpdate, onC
   }
 
   const canPublish = piece?.status === 'programado' && !isNew
+
+  async function handleDelete() {
+    if (!piece) return
+    const ok = await confirm({
+      title: 'Eliminar pieza',
+      message: `¿Eliminar "${piece.title}"? Esta acción no se puede deshacer.`,
+      confirmLabel: 'Eliminar',
+      danger: true,
+    })
+    if (!ok) return
+    setDeleting(true)
+    try {
+      await api.delete(`/api/content/pieces/${piece.id}`)
+      onDelete?.(piece.id)
+      onClose()
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Error al eliminar')
+    } finally { setDeleting(false) }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -359,6 +384,17 @@ export function PieceModal({ piece, defaultDate, clients, isAdmin, onUpdate, onC
           )}
           {!isNew && !editing && isAdmin && (
             <button onClick={() => setEditing(true)} className="text-sm text-slate-500 hover:text-slate-700">Editar</button>
+          )}
+          {!isNew && !editing && isAdmin && (
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              title="Eliminar pieza"
+              className="flex items-center gap-1.5 text-sm text-red-400 hover:text-red-600 disabled:opacity-50 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              {deleting ? 'Eliminando…' : 'Eliminar'}
+            </button>
           )}
           <div className="ml-auto flex gap-2">
             {(isNew || editing) && (

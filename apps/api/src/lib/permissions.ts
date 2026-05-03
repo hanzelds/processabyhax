@@ -19,6 +19,8 @@ export const ALL_PERMISSIONS = [
   'dashboard.global',
   'dashboard.personal',
   'admin_tasks.access',
+  'content.preproduccion',
+  'content.calendar',
 ] as const
 
 export type Permission = (typeof ALL_PERMISSIONS)[number]
@@ -42,6 +44,8 @@ export const PERMISSION_LABEL: Record<Permission, string> = {
   'dashboard.global':       'Dashboard global (métricas equipo)',
   'dashboard.personal':     'Dashboard personal',
   'admin_tasks.access':     'Tareas administrativas (exclusivo admin)',
+  'content.preproduccion':  'Acceso a módulo de preproducción (briefs)',
+  'content.calendar':       'Acceso a calendario de contenido',
 }
 
 export const PERMISSION_MODULE: Record<Permission, string> = {
@@ -63,6 +67,8 @@ export const PERMISSION_MODULE: Record<Permission, string> = {
   'dashboard.global':       'Dashboard',
   'dashboard.personal':     'Dashboard',
   'admin_tasks.access':     'Admin',
+  'content.preproduccion':  'Contenido',
+  'content.calendar':       'Contenido',
 }
 
 export const ROLE_DEFAULTS: Record<string, Permission[]> = {
@@ -73,6 +79,7 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     'tasks.read_all', 'tasks.read_assigned', 'tasks.write', 'tasks.move_own', 'tasks.reassign',
     'dashboard.global', 'dashboard.personal',
     'admin_tasks.access',
+    'content.preproduccion', 'content.calendar',
   ],
   LEAD: [
     'users.read',
@@ -80,6 +87,7 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
     'projects.read_all', 'projects.read_assigned', 'projects.write', 'projects.close',
     'tasks.read_all', 'tasks.read_assigned', 'tasks.write', 'tasks.move_own', 'tasks.reassign',
     'dashboard.global', 'dashboard.personal',
+    'content.preproduccion', 'content.calendar',
   ],
   TEAM: [
     'projects.read_assigned',

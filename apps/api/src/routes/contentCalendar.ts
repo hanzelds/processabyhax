@@ -8,10 +8,11 @@ export const contentCalendarRouter = Router()
 
 const PIECE_SELECT = {
   id: true, title: true, type: true, platforms: true, status: true,
+  clientId: true,
   copy: true, hashtags: true, referencesUrls: true, copyStatus: true,
   publicationNotes: true, scheduledDate: true, scheduledTime: true,
   publishedAt: true, briefId: true, createdAt: true, updatedAt: true,
-  client: { select: { id: true, name: true } },
+  client: { select: { id: true, name: true, color: true } },
   createdBy: { select: { id: true, name: true } },
   brief: { select: { id: true, title: true, status: true } },
 }
@@ -252,6 +253,24 @@ contentCalendarRouter.patch('/pieces/:id/publish', isAdminOrLead, async (req, re
   }).catch(console.error)
 
   res.json(piece)
+})
+
+// ── DELETE /pieces/:id ────────────────────────────────────────────────────────
+contentCalendarRouter.delete('/pieces/:id', isAdminOrLead, async (req, res) => {
+  try {
+    const piece = await prisma.contentPiece.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, title: true },
+    })
+    if (!piece) { res.status(404).json({ error: 'Pieza no encontrada' }); return }
+
+    await prisma.contentPieceHistory.deleteMany({ where: { pieceId: req.params.id } })
+    await prisma.contentPiece.delete({ where: { id: req.params.id } })
+
+    res.json({ ok: true })
+  } catch (e) {
+    console.error(e); res.status(500).json({ error: 'Error al eliminar pieza' })
+  }
 })
 
 // ── GET /pieces/:id/history ───────────────────────────────────────────────────

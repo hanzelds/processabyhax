@@ -124,12 +124,13 @@ model User {
   area        String?
   avatarUrl   String?
   bio         String?
-  phone       String?
+  phone            String?
+  whatsappNotif    Boolean   @default(true)
   joinedAt    DateTime?
   lastSeenAt  DateTime?
   createdAt   DateTime   @default(now())
 
-  tasks               Task[]
+  taskAssignments     TaskAssignee[]
   activityLogs        ActivityLog[]
   projectMemberships  ProjectMember[]          @relation("ProjectMemberUser")
   projectMemberAdds   ProjectMember[]          @relation("ProjectMemberAddedBy")
@@ -148,12 +149,24 @@ model User {
   adminRecurrences    AdminTaskRecurrence[]    @relation("AdminRecurrenceCreatedBy")
   adminTaskHistory    AdminTaskHistory[]       @relation("AdminTaskHistoryActor")
   // Content modules
+  monthlyObjectives   ClientMonthlyObjective[]
   briefsCreated       ContentBrief[]           @relation("BriefCreatedBy")
   briefAssignments    BriefAssignee[]          @relation("BriefAssigneeUser")
   briefsAssigned      BriefAssignee[]          @relation("BriefAssignedBy")
   briefHistory        BriefHistory[]           @relation("BriefHistoryActor")
+  briefFiles          BriefFile[]              @relation("BriefFileUploader")
   contentPieces       ContentPiece[]           @relation("PieceCreatedBy")
   pieceHistory        ContentPieceHistory[]    @relation("PieceHistoryActor")
+  // Docs
+  docPagesCreated     DocPage[]                @relation("DocPageCreator")
+  docPagesUpdated     DocPage[]                @relation("DocPageUpdater")
+  docPagesApproved    DocPage[]                @relation("DocPageApprover")
+  docVersions         DocPageVersion[]         @relation("DocVersionSaver")
+  docFavorites        DocFavorite[]            @relation("DocFavoriteUser")
+  // Brief comments
+  briefComments       BriefComment[]           @relation("BriefCommentAuthor")
+  resolvedComments    BriefComment[]           @relation("BriefCommentResolver")
+  commentMentions     CommentMention[]         @relation("CommentMentionUser")
 
   @@map("users")
 }
@@ -241,6 +254,7 @@ model Client {
   website       String?
   description   String?
   relationStart DateTime?
+  color         String?
   createdAt     DateTime     @default(now())
   projects      Project[]
   contacts      ClientContact[]
@@ -249,6 +263,9 @@ model Client {
   history       ClientHistory[]
   briefs        ContentBrief[]
   contentPieces ContentPiece[]
+  portalTokens  ClientPortalToken[]
+  monthlyObjectives ClientMonthlyObjective[]
+  contentApprovals  ClientContentApproval[]
 
   @@map("clients")
 }
@@ -340,21 +357,34 @@ model Project {
 }
 
 model Task {
-  id          String     @id @default(cuid())
+  id          String         @id @default(cuid())
   title       String
   description String?
   projectId   String
-  project     Project    @relation(fields: [projectId], references: [id])
-  assignedTo  String?
-  assignee    User?      @relation(fields: [assignedTo], references: [id])
-  status      TaskStatus @default(PENDING)
+  project     Project        @relation(fields: [projectId], references: [id])
+  assignees   TaskAssignee[]
+  status      TaskStatus     @default(PENDING)
   taskType    TaskType?
   dueDate     DateTime?
   completedAt DateTime?
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
 
   @@map("tasks")
+}
+
+model TaskAssignee {
+  taskId     String
+  userId     String
+  assignedAt DateTime @default(now())
+  assignedBy String?
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@id([taskId, userId])
+  @@index([userId])
+  @@map("task_assignees")
 }
 
 model ProjectMember {
@@ -572,6 +602,7 @@ enum BriefStatus {
   aprobacion_cliente
   aprobado
   en_produccion
+  en_edicion
   entregado
   cancelado
 }
@@ -594,6 +625,7 @@ enum ContentPieceStatus {
   programado
   publicado
   en_revision
+  en_edicion
   pausado
   cancelado
 }
@@ -628,10 +660,64 @@ model ContentBrief {
   assignees           BriefAssignee[]
   history             BriefHistory[]
   contentPieces       ContentPiece[]
+  clientApprovals     ClientContentApproval[]
+  files               BriefFile[]
+  comments            BriefComment[]
 
   @@index([clientId, status])
   @@index([status])
   @@map("content_briefs")
+}
+
+model BriefComment {
+  id           String    @id @default(cuid())
+  briefId      String    @map("brief_id")
+  brief        ContentBrief @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  authorId     String    @map("author_id")
+  author       User      @relation("BriefCommentAuthor", fields: [authorId], references: [id])
+  parentId     String?   @map("parent_id")
+  parent       BriefComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies      BriefComment[] @relation("CommentReplies")
+  content      String
+  isResolved   Boolean   @default(false) @map("is_resolved")
+  resolvedById String?   @map("resolved_by_id")
+  resolvedBy   User?     @relation("BriefCommentResolver", fields: [resolvedById], references: [id])
+  resolvedAt   DateTime? @map("resolved_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  mentions     CommentMention[]
+
+  @@index([briefId, parentId, createdAt])
+  @@map("brief_comments")
+}
+
+model CommentMention {
+  id        String   @id @default(cuid())
+  commentId String   @map("comment_id")
+  comment   BriefComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  userId    String   @map("user_id")
+  user      User     @relation("CommentMentionUser", fields: [userId], references: [id])
+
+  @@unique([commentId, userId])
+  @@map("comment_mentions")
+}
+
+model BriefFile {
+  id           String      @id @default(cuid())
+  briefId      String
+  brief        ContentBrief @relation(fields: [briefId], references: [id], onDelete: Cascade)
+  uploadedById String
+  uploader     User        @relation("BriefFileUploader", fields: [uploadedById], references: [id])
+  originalName String
+  storedName   String
+  filePath     String
+  mimeType     String
+  sizeBytes    Int
+  label        String?     // optional display label
+  createdAt    DateTime    @default(now())
+
+  @@index([briefId])
+  @@map("brief_files")
 }
 
 model BriefAssignee {
@@ -688,6 +774,7 @@ model ContentPiece {
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
   history          ContentPieceHistory[]
+  clientApprovals  ClientContentApproval[]
 
   @@index([scheduledDate, status])
   @@index([clientId, status])
@@ -708,4 +795,136 @@ model ContentPieceHistory {
 
   @@index([pieceId, createdAt(sort: Desc)])
   @@map("content_piece_history")
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+  updatedById String?
+
+  @@map("system_settings")
+}
+
+// ── Client Portal ─────────────────────────────────────────────────────────────
+
+model ClientPortalToken {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id])
+  token     String   @unique
+  month     String   // '2025-06'
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  approvals ClientContentApproval[]
+
+  @@unique([clientId, month])
+  @@index([token])
+  @@map("client_portal_tokens")
+}
+
+model ClientMonthlyObjective {
+  id             String   @id @default(cuid())
+  clientId       String
+  client         Client   @relation(fields: [clientId], references: [id])
+  month          String   // '2025-06'
+  engagementGoal String?
+  reachGoal      String?
+  followersGoal  String?
+  leadsGoal      String?
+  createdById    String
+  createdBy      User     @relation(fields: [createdById], references: [id])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([clientId, month])
+  @@index([clientId, month])
+  @@map("client_monthly_objectives")
+}
+
+// ── Docs ─────────────────────────────────────────────────────────────────────
+
+model DocPage {
+  id            String    @id @default(cuid())
+  title         String    @default("Sin título")
+  icon          String?
+  cover         String?
+  parentId      String?
+  parent        DocPage?  @relation("DocPageChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children      DocPage[] @relation("DocPageChildren")
+  contextType   String
+  contextId     String
+  content       Json      @default("[]")
+  isPublished   Boolean   @default(true)
+  sortOrder     Int       @default(0)
+  // New fields added via raw SQL (snake_case in DB)
+  pageStatus    String    @default("borrador") @map("page_status")
+  isTemplate    Boolean   @default(false)      @map("is_template")
+  templateName  String?                        @map("template_name")
+  templateDesc  String?                        @map("template_desc")
+  approvedById  String?                        @map("approved_by_id")
+  approvedAt    DateTime?                      @map("approved_at")
+  createdById   String
+  createdBy     User      @relation("DocPageCreator",  fields: [createdById],  references: [id])
+  updatedById   String?
+  updatedBy     User?     @relation("DocPageUpdater",  fields: [updatedById],  references: [id])
+  approvedBy    User?     @relation("DocPageApprover", fields: [approvedById], references: [id])
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  versions      DocPageVersion[]
+  favoritedBy   DocFavorite[]
+
+  @@index([contextType, contextId, parentId])
+  @@index([parentId, sortOrder])
+  @@map("doc_pages")
+}
+
+model DocPageVersion {
+  id        String   @id @default(cuid())
+  pageId    String   @map("page_id")
+  page      DocPage  @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  version   Int
+  content   Json
+  savedById String   @map("saved_by_id")
+  savedBy   User     @relation("DocVersionSaver", fields: [savedById], references: [id])
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([pageId, version])
+  @@index([pageId, createdAt(sort: Desc)])
+  @@map("doc_page_versions")
+}
+
+model DocFavorite {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  user      User     @relation("DocFavoriteUser", fields: [userId], references: [id], onDelete: Cascade)
+  pageId    String   @map("page_id")
+  page      DocPage  @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, pageId])
+  @@map("doc_favorites")
+}
+
+model ClientContentApproval {
+  id         String   @id @default(cuid())
+  pieceId    String?
+  piece      ContentPiece?    @relation(fields: [pieceId], references: [id])
+  briefId    String?
+  brief      ContentBrief?    @relation(fields: [briefId], references: [id])
+  clientId   String
+  client     Client   @relation(fields: [clientId], references: [id])
+  tokenId    String
+  token      ClientPortalToken @relation(fields: [tokenId], references: [id])
+  action     String   // 'approved' | 'changes_requested'
+  changeType String?  // 'copy' | 'design' | 'date' | 'concept' | 'other'
+  feedback   String?
+  actionedAt DateTime @default(now())
+
+  @@index([pieceId])
+  @@index([briefId])
+  @@index([clientId, actionedAt(sort: Desc)])
+  @@map("client_content_approvals")
 }

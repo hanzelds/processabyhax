@@ -2,12 +2,14 @@ import { getServerUser } from '@/lib/auth'
 import { cookies } from 'next/headers'
 import { AdminDashboard } from '@/components/dashboard/AdminDashboard'
 import { TeamDashboard } from '@/components/dashboard/TeamDashboard'
+import { LeadDashboard } from '@/components/dashboard/LeadDashboard'
 import {
   AdminKPIs,
   WorkloadEntry,
   ProjectProgress,
   ActivityFeedResponse,
   TeamKPIs,
+  LeadKPIs,
 } from '@/types/dashboard'
 import { Task, AdminTaskAlerts } from '@/types'
 
@@ -28,6 +30,17 @@ async function apiFetch<T>(path: string, token: string): Promise<T | null> {
 
 interface MyTasks { today: Task[]; pending: Task[]; overdue: Task[] }
 
+const EMPTY_TEAM_KPIS: TeamKPIs = {
+  todayCount: 0, inProgress: 0, overdue: 0, blocked: 0,
+  completedWeek: 0, completedMonth: 0, completionRatePct: 100,
+  streakDays: 0, dueThisWeek: 0, activeProjects: 0,
+}
+
+const EMPTY_LEAD_KPIS: LeadKPIs = {
+  projects: { active: 0, atRisk: 0, overdue: 0, avgProgressPct: 0, deliveryRatePct: 100 },
+  team: { totalMembers: 0, availableMembers: 0, overdueTasksCount: 0, blockedTasksCount: 0, mostLoadedMember: null, overdueMembers: [] },
+}
+
 export default async function DashboardPage() {
   const user = await getServerUser()
   const cookieStore = await cookies()
@@ -35,6 +48,7 @@ export default async function DashboardPage() {
 
   if (!user) return null
 
+  // ── ADMIN ──────────────────────────────────────────────────────────────────
   if (user.role === 'ADMIN') {
     const [kpis, workload, progress, activity, myTasksData, adminAlerts] = await Promise.all([
       apiFetch<AdminKPIs>('/api/dashboard/admin/kpis', token),
@@ -57,7 +71,27 @@ export default async function DashboardPage() {
     )
   }
 
-  // TEAM role
+  // ── LEAD ───────────────────────────────────────────────────────────────────
+  if (user.role === 'LEAD') {
+    const [leadKpis, teamKpis, tasks, progress] = await Promise.all([
+      apiFetch<LeadKPIs>('/api/dashboard/lead/kpis', token),
+      apiFetch<TeamKPIs>('/api/dashboard/team/kpis', token),
+      apiFetch<MyTasks>('/api/tasks/my', token),
+      apiFetch<ProjectProgress[]>('/api/dashboard/team/projects-progress', token),
+    ])
+
+    return (
+      <LeadDashboard
+        user={user}
+        leadKpis={leadKpis ?? EMPTY_LEAD_KPIS}
+        teamKpis={teamKpis ?? EMPTY_TEAM_KPIS}
+        tasks={tasks ?? { today: [], pending: [], overdue: [] }}
+        progress={progress ?? []}
+      />
+    )
+  }
+
+  // ── TEAM ───────────────────────────────────────────────────────────────────
   const [kpis, tasks, progress] = await Promise.all([
     apiFetch<TeamKPIs>('/api/dashboard/team/kpis', token),
     apiFetch<MyTasks>('/api/tasks/my', token),
@@ -67,7 +101,7 @@ export default async function DashboardPage() {
   return (
     <TeamDashboard
       user={user}
-      kpis={kpis ?? { todayCount: 0, inProgress: 0, overdue: 0, completedWeek: 0 }}
+      kpis={kpis ?? EMPTY_TEAM_KPIS}
       tasks={tasks ?? { today: [], pending: [], overdue: [] }}
       progress={progress ?? []}
     />

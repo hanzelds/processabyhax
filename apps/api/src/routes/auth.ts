@@ -6,6 +6,7 @@ import { prisma } from '../lib/prisma'
 import { isAuth, signToken } from '../middleware/auth'
 import { getEffectivePermissions } from '../lib/permissions'
 import { sendInvitationEmail, sendPasswordResetEmail } from '../lib/email'
+import { getSettings } from '../lib/settings'
 
 export const authRouter = Router()
 
@@ -30,10 +31,28 @@ authRouter.post('/login', async (req, res) => {
     res.status(401).json({ error: msg }); return
   }
 
+  const settings = await getSettings()
+  const sessionDays = parseInt(settings.session_duration_days ?? '30', 10) || 30
+  const maxSessions = parseInt(settings.max_sessions_per_user ?? '10', 10) || 10
+  const sessionMs   = sessionDays * 24 * 60 * 60 * 1000
+
+  // Enforce max sessions: revoke oldest if limit reached
+  const activeSessions = await prisma.refreshToken.findMany({
+    where: { userId: user.id, revokedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: 'asc' },
+  })
+  if (activeSessions.length >= maxSessions) {
+    const toRevoke = activeSessions.slice(0, activeSessions.length - maxSessions + 1)
+    await prisma.refreshToken.updateMany({
+      where: { id: { in: toRevoke.map(s => s.id) } },
+      data: { revokedAt: new Date() },
+    })
+  }
+
   // Create session (jti-based)
   const jti = uuidv4()
   const tokenHash = hashToken(jti)
-  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+  const expiresAt = new Date(Date.now() + sessionMs)
   const deviceInfo = (req.headers['user-agent'] || '').substring(0, 255)
   const ipAddress  = (req.headers['x-forwarded-for'] as string || req.socket.remoteAddress || '').substring(0, 45)
 
@@ -46,7 +65,7 @@ authRouter.post('/login', async (req, res) => {
     httpOnly: true,
     secure: process.env.COOKIE_SECURE === 'true',
     sameSite: 'lax',
-    maxAge: 30 * 24 * 60 * 60 * 1000,
+    maxAge: sessionMs,
   })
 
   const permissions = await getEffectivePermissions(user.id, user.role)
@@ -70,7 +89,7 @@ authRouter.post('/logout', async (req, res) => {
 authRouter.get('/me', isAuth, async (req, res) => {
   const user = await prisma.user.findUnique({
     where: { id: req.user!.userId },
-    select: { id: true, name: true, email: true, role: true, area: true, status: true, avatarUrl: true, bio: true, phone: true, joinedAt: true, lastSeenAt: true, createdAt: true },
+    select: { id: true, name: true, email: true, role: true, area: true, status: true, avatarUrl: true, bio: true, phone: true, whatsappNotif: true, joinedAt: true, lastSeenAt: true, createdAt: true },
   })
   if (!user) { res.status(404).json({ error: 'Usuario no encontrado' }); return }
   const permissions = await getEffectivePermissions(user.id, user.role)
@@ -109,7 +128,12 @@ authRouter.post('/forgot-password', async (req, res) => {
 authRouter.post('/reset-password', async (req, res) => {
   const { token, password } = req.body
   if (!token || !password) { res.status(400).json({ error: 'Token y contraseña requeridos' }); return }
-  if (password.length < 6) { res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' }); return }
+
+  const settings = await getSettings()
+  const minLen = parseInt(settings.password_min_length ?? '6', 10) || 6
+  if (password.length < minLen) {
+    res.status(400).json({ error: `La contraseña debe tener al menos ${minLen} caracteres` }); return
+  }
 
   const tokenHash = hashToken(token)
   const reset = await prisma.passwordReset.findUnique({ where: { tokenHash } })
@@ -133,7 +157,12 @@ authRouter.post('/reset-password', async (req, res) => {
 authRouter.post('/accept-invitation', async (req, res) => {
   const { token, password } = req.body
   if (!token || !password) { res.status(400).json({ error: 'Token y contraseña requeridos' }); return }
-  if (password.length < 6) { res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' }); return }
+
+  const settings = await getSettings()
+  const minLen = parseInt(settings.password_min_length ?? '6', 10) || 6
+  if (password.length < minLen) {
+    res.status(400).json({ error: `La contraseña debe tener al menos ${minLen} caracteres` }); return
+  }
 
   const tokenHash = hashToken(token)
   const invitation = await prisma.userInvitation.findUnique({ where: { tokenHash } })
@@ -142,10 +171,10 @@ authRouter.post('/accept-invitation', async (req, res) => {
   }
 
   const hashed = await bcrypt.hash(password, 10)
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: invitation.userId }, data: { password: hashed, status: 'ACTIVE' } }),
+  const [user] = await prisma.$transaction([
+    prisma.user.update({ where: { id: invitation.userId }, data: { password: hashed, status: 'ACTIVE' }, select: { id: true, name: true, email: true } }),
     prisma.userInvitation.update({ where: { id: invitation.id }, data: { acceptedAt: new Date() } }),
   ])
 
-  res.json({ ok: true })
+  res.json({ ok: true, user })
 })

@@ -1,10 +1,15 @@
 import { Router } from 'express'
 import { prisma } from '../lib/prisma'
-import { isAuth, isAdmin } from '../middleware/auth'
+import { isAuth, isAdmin, isAdminOrLead } from '../middleware/auth'
 import { ProjectStatus } from '@prisma/client'
 import { logActivity } from '../lib/activityLogger'
 import { logProjectHistory, relativeTime } from '../lib/projectHistory'
 import { logClientHistory } from '../lib/clientHistory'
+import { getSettings } from '../lib/settings'
+import fs from 'fs'
+import path from 'path'
+
+const UPLOAD_BASE = '/mnt/volume-us-dodso/var/www/erp-hax/storage/processa/uploads/projects'
 
 export const projectsRouter = Router()
 
@@ -48,9 +53,11 @@ projectsRouter.get('/', isAuth, async (req, res) => {
   const { user } = req
   const today = new Date(); today.setHours(0, 0, 0, 0)
 
-  const where = (user!.role === 'ADMIN' || user!.role === 'LEAD')
+  const settings = await getSettings()
+  const teamSeeAll = settings.allow_team_see_all_projects === 'true'
+  const where = (user!.role === 'ADMIN' || user!.role === 'LEAD' || teamSeeAll)
     ? {}
-    : { tasks: { some: { assignedTo: user!.userId } } }
+    : { tasks: { some: { assignees: { some: { userId: user!.userId } } } } }
 
   const projects = await prisma.project.findMany({
     where,
@@ -97,9 +104,9 @@ projectsRouter.get('/:id', isAuth, async (req, res) => {
     include: {
       client: true,
       tasks: {
-        where: user!.role === 'TEAM' ? { assignedTo: user!.userId } : {},
+        where: user!.role === 'TEAM' ? { assignees: { some: { userId: user!.userId } } } : {},
         orderBy: { createdAt: 'asc' },
-        include: { assignee: { select: { id: true, name: true, area: true } } },
+        include: { assignees: { include: { user: { select: { id: true, name: true, area: true } } } } },
       },
       members: {
         include: { user: { select: { id: true, name: true, area: true } } },
@@ -108,7 +115,15 @@ projectsRouter.get('/:id', isAuth, async (req, res) => {
     },
   })
   if (!project) { res.status(404).json({ error: 'Proyecto no encontrado' }); return }
-  res.json(project)
+  // Flatten task assignees to flat user objects
+  const result = {
+    ...project,
+    tasks: project.tasks.map(t => ({
+      ...t,
+      assignees: (t.assignees as { user: unknown }[]).map(a => a.user),
+    })),
+  }
+  res.json(result)
 })
 
 // ── GET /projects/:id/metrics ────────────────────────────────────────────────
@@ -118,12 +133,12 @@ projectsRouter.get('/:id/metrics', isAuth, async (req, res) => {
 
   const [tasksByStatus, unassigned, overdue, activeMembers] = await Promise.all([
     prisma.task.groupBy({ by: ['status'], where: { projectId: req.params.id }, _count: { id: true } }),
-    prisma.task.count({ where: { projectId: req.params.id, assignedTo: null } }),
+    prisma.task.count({ where: { projectId: req.params.id, assignees: { none: {} } } }),
     prisma.task.count({ where: { projectId: req.params.id, status: { not: 'COMPLETED' }, dueDate: { lt: today } } }),
-    prisma.task.findMany({
-      where: { projectId: req.params.id, status: { not: 'COMPLETED' }, assignedTo: { not: null } },
-      distinct: ['assignedTo'],
-      select: { assignedTo: true },
+    prisma.taskAssignee.findMany({
+      where: { task: { projectId: req.params.id, status: { not: 'COMPLETED' } } },
+      distinct: ['userId'],
+      select: { userId: true },
     }),
   ])
 
@@ -145,10 +160,21 @@ projectsRouter.get('/:id/metrics', isAuth, async (req, res) => {
 
 // ── POST /projects ───────────────────────────────────────────────────────────
 
-projectsRouter.post('/', isAdmin, async (req, res) => {
+projectsRouter.post('/', isAuth, async (req, res) => {
+  const { role } = req.user!
+  const projSettings = await getSettings()
+  if (role !== 'ADMIN' && role !== 'LEAD' && projSettings.allow_team_create_projects !== 'true') {
+    res.status(403).json({ error: 'No tienes permiso para crear proyectos' }); return
+  }
   const { name, clientId, description, startDate, estimatedClose } = req.body
   if (!name || !clientId || !startDate) {
     res.status(400).json({ error: 'Nombre, cliente y fecha de inicio son requeridos' }); return
+  }
+  if (projSettings.project_requires_description === 'true' && !description?.trim()) {
+    res.status(400).json({ error: 'La descripción del proyecto es obligatoria' }); return
+  }
+  if (projSettings.project_requires_estimated_close === 'true' && !estimatedClose) {
+    res.status(400).json({ error: 'La fecha de cierre estimada es obligatoria' }); return
   }
   const client = await prisma.client.findUnique({ where: { id: clientId }, select: { name: true } })
   const project = await prisma.project.create({
@@ -169,8 +195,6 @@ projectsRouter.patch('/:id', isAdmin, async (req, res) => {
   const { name, description, status, estimatedClose } = req.body
   const prev = await prisma.project.findUnique({ where: { id: req.params.id } })
   if (!prev) { res.status(404).json({ error: 'Proyecto no encontrado' }); return }
-  if (prev.status === 'COMPLETED') { res.status(400).json({ error: 'Proyecto completado: solo lectura' }); return }
-
   const data: Record<string, unknown> = {}
   if (name) data.name = name
   if (description !== undefined) data.description = description
@@ -206,11 +230,11 @@ projectsRouter.get('/:id/members', isAuth, async (req, res) => {
 
   const enriched = await Promise.all(members.map(async m => {
     const [active, completed, nextDue, overdueCount, blockedCount] = await Promise.all([
-      prisma.task.count({ where: { projectId: req.params.id, assignedTo: m.userId, status: { not: 'COMPLETED' } } }),
-      prisma.task.count({ where: { projectId: req.params.id, assignedTo: m.userId, status: 'COMPLETED' } }),
-      prisma.task.findFirst({ where: { projectId: req.params.id, assignedTo: m.userId, status: { not: 'COMPLETED' }, dueDate: { not: null } }, orderBy: { dueDate: 'asc' }, select: { dueDate: true, title: true } }),
-      prisma.task.count({ where: { projectId: req.params.id, assignedTo: m.userId, status: { not: 'COMPLETED' }, dueDate: { lt: today } } }),
-      prisma.task.count({ where: { projectId: req.params.id, assignedTo: m.userId, status: 'BLOCKED' } }),
+      prisma.task.count({ where: { projectId: req.params.id, assignees: { some: { userId: m.userId } }, status: { not: 'COMPLETED' } } }),
+      prisma.task.count({ where: { projectId: req.params.id, assignees: { some: { userId: m.userId } }, status: 'COMPLETED' } }),
+      prisma.task.findFirst({ where: { projectId: req.params.id, assignees: { some: { userId: m.userId } }, status: { not: 'COMPLETED' }, dueDate: { not: null } }, orderBy: { dueDate: 'asc' }, select: { dueDate: true, title: true } }),
+      prisma.task.count({ where: { projectId: req.params.id, assignees: { some: { userId: m.userId } }, status: { not: 'COMPLETED' }, dueDate: { lt: today } } }),
+      prisma.task.count({ where: { projectId: req.params.id, assignees: { some: { userId: m.userId } }, status: 'BLOCKED' } }),
     ])
     return { ...m, activeTasks: active, completedTasks: completed, nextDue, overdueCount, blockedCount }
   }))
@@ -305,4 +329,63 @@ projectsRouter.get('/:id/history', isAuth, async (req, res) => {
     total,
     hasMore: offset + limit < total,
   })
+})
+
+// ── PATCH /projects/:id/unlock ────────────────────────────────────────────────
+
+projectsRouter.patch('/:id/unlock', isAdmin, async (req, res) => {
+  const prev = await prisma.project.findUnique({ where: { id: req.params.id } })
+  if (!prev) { res.status(404).json({ error: 'Proyecto no encontrado' }); return }
+  if (prev.status !== 'COMPLETED') { res.status(400).json({ error: 'El proyecto no está completado' }); return }
+
+  const project = await prisma.project.update({
+    where: { id: req.params.id },
+    data: { status: 'IN_PROGRESS', closedAt: null },
+    include: { client: { select: { id: true, name: true } } },
+  })
+
+  await logProjectHistory({
+    projectId: project.id, actorId: req.user!.userId,
+    eventType: 'status_changed',
+    description: 'Proyecto reabierto por administrador',
+    meta: { from_status: 'COMPLETED', to_status: 'IN_PROGRESS' },
+  })
+
+  res.json(project)
+})
+
+// ── DELETE /projects/:id ──────────────────────────────────────────────────────
+
+projectsRouter.delete('/:id', isAdmin, async (req, res) => {
+  const project = await prisma.project.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, name: true, clientId: true },
+  })
+  if (!project) { res.status(404).json({ error: 'Proyecto no encontrado' }); return }
+
+  // Delete physical files from disk
+  const files = await prisma.projectFile.findMany({
+    where: { projectId: project.id },
+    select: { filePath: true },
+  })
+  for (const f of files) {
+    try { fs.unlinkSync(f.filePath) } catch {}
+  }
+  const projectDir = path.join(UPLOAD_BASE, project.id)
+  try { fs.rmdirSync(projectDir) } catch {}
+
+  // Delete DB records in dependency order
+  await prisma.projectHistory.deleteMany({ where: { projectId: project.id } })
+  await prisma.projectFile.deleteMany({   where: { projectId: project.id } })
+  await prisma.projectMember.deleteMany({ where: { projectId: project.id } })
+  await prisma.task.deleteMany({          where: { projectId: project.id } })
+  await prisma.project.delete({           where: { id: project.id } })
+
+  await logActivity({
+    actorId: req.user!.userId, eventType: 'project_status_changed',
+    entityType: 'project', entityId: project.id, entityName: project.name,
+    meta: { clientId: project.clientId },
+  })
+
+  res.json({ ok: true })
 })

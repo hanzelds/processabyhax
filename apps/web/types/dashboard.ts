@@ -50,8 +50,43 @@ export interface ActivityFeedResponse {
 }
 
 export interface TeamKPIs {
+  // Estado
   todayCount: number
   inProgress: number
   overdue: number
+  blocked: number
+  // Rendimiento
   completedWeek: number
+  completedMonth: number
+  completionRatePct: number
+  streakDays: number
+  // Carga
+  dueThisWeek: number
+  activeProjects: number
+}
+
+export interface LeadMember {
+  id: string
+  name: string
+  area?: string | null
+  load?: number
+  overdueCount?: number
+}
+
+export interface LeadKPIs {
+  projects: {
+    active: number
+    atRisk: number
+    overdue: number
+    avgProgressPct: number
+    deliveryRatePct: number
+  }
+  team: {
+    totalMembers: number
+    availableMembers: number
+    overdueTasksCount: number
+    blockedTasksCount: number
+    mostLoadedMember: LeadMember | null
+    overdueMembers: LeadMember[]
+  }
 }

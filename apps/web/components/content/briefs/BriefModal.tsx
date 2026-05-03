@@ -1,13 +1,47 @@
 'use client'
 
-import { useState } from 'react'
-import { ContentBrief, BriefStatus, BriefRole, Client, User, ContentType, ContentPlatform } from '@/types'
+import { useState, useRef } from 'react'
+import { ContentBrief, BriefStatus, BriefRole, Client, User, ContentType, ContentPlatform, BriefCommentItem } from '@/types'
 import {
   BRIEF_STATUS_LABEL, BRIEF_STATUS_COLOR, ALL_BRIEF_STATUSES,
-  CONTENT_TYPE_OPTIONS, PLATFORM_OPTIONS, BRIEF_ROLE_LABEL, COPY_STATUS_LABEL,
+  CONTENT_TYPE_OPTIONS, PLATFORM_OPTIONS, BRIEF_ROLE_LABEL,
 } from '@/lib/utils'
 import { api } from '@/lib/api'
-import { X, Plus, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
+import { X, Plus, Trash2, ChevronDown, ChevronUp, Paperclip, Upload, FileText, Image, Film, Music, Archive, ExternalLink, Download, MessageSquare } from 'lucide-react'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
+import { BriefComments } from './comments/BriefComments'
+import { StatusNoteModal } from './comments/StatusNoteModal'
+
+// Always use relative /api path — Next.js rewrites proxy it to localhost:4100
+const API_BASE = '/api'
+
+interface BriefFileItem {
+  id: string
+  originalName: string
+  mimeType: string
+  sizeBytes: number
+  label: string | null
+  createdAt: string
+  uploader?: { id: string; name: string }
+}
+
+function fileIcon(mime: string) {
+  if (mime.startsWith('image/')) return <Image className="w-4 h-4" />
+  if (mime.startsWith('video/')) return <Film className="w-4 h-4" />
+  if (mime.startsWith('audio/')) return <Music className="w-4 h-4" />
+  if (mime.includes('zip') || mime.includes('rar') || mime.includes('tar')) return <Archive className="w-4 h-4" />
+  return <FileText className="w-4 h-4" />
+}
+
+function fmtBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function isPreviewable(mime: string) {
+  return mime.startsWith('image/') || mime === 'application/pdf' || mime.startsWith('video/')
+}
 
 const INPUT = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#17394f]/20 focus:border-[#17394f]/40'
 const LABEL = 'text-xs font-semibold text-slate-500 mb-1 block uppercase tracking-wide'
@@ -26,14 +60,18 @@ interface Props {
   clients: Client[]
   users: User[]
   isAdmin: boolean
+  currentUserId: string
   onUpdate: (b: ContentBrief) => void
   onDelete: (id: string) => void
   onCreate?: (b: ContentBrief) => void
   onClose: () => void
 }
 
-export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, onUpdate, onDelete, onCreate, onClose }: Props) {
-  const isNew = !brief
+const STATUS_REQUIRES_NOTE: BriefStatus[] = ['revision_interna', 'aprobacion_cliente', 'aprobado', 'en_produccion']
+
+export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, currentUserId, onUpdate, onDelete, onCreate, onClose }: Props) {
+  const isNew   = !brief
+  const confirm = useConfirm()
 
   const [title, setTitle]       = useState(brief?.title ?? '')
   const [clientId, setClientId] = useState(brief?.clientId ?? '')
@@ -59,10 +97,55 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, onUp
 
   const [editing, setEditing]   = useState(isNew)
   const [saving, setSaving]     = useState(false)
-  const [tab, setTab]           = useState<'info'|'guion'|'asignados'|'historial'>('info')
+  const [tab, setTab]           = useState<'info'|'guion'|'comentarios'|'archivos'|'asignados'|'historial'>('info')
   const [showScript, setShowScript] = useState(false)
+  const [pendingStatus, setPendingStatus] = useState<BriefStatus | null>(null)
+  const [commentCount, setCommentCount]   = useState<number>(0)
 
-  const isLocked = brief?.status === 'entregado' || brief?.status === 'cancelado'
+  // Files tab state
+  const [files, setFiles]             = useState<BriefFileItem[]>([])
+  const [filesLoaded, setFilesLoaded] = useState(false)
+  const [uploading, setUploading]     = useState(false)
+  const [uploadLabel, setUploadLabel] = useState('')
+  const [previewFile, setPreviewFile] = useState<BriefFileItem | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  async function loadFiles() {
+    if (!brief || filesLoaded) return
+    const data = await api.get<BriefFileItem[]>(`/api/briefs/${brief.id}/files`)
+    setFiles(data)
+    setFilesLoaded(true)
+  }
+
+  async function uploadFile(file: File) {
+    if (!brief) return
+    setUploading(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      if (uploadLabel.trim()) form.append('label', uploadLabel.trim())
+      const res = await fetch(`${API_BASE}/briefs/${brief.id}/files`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include',
+      })
+      if (!res.ok) { const e = await res.json(); throw new Error(e.error ?? 'Error al subir') }
+      const created: BriefFileItem = await res.json()
+      setFiles(prev => [...prev, created])
+      setUploadLabel('')
+    } finally { setUploading(false) }
+  }
+
+  async function deleteFile(fileId: string) {
+    if (!brief) return
+    const ok = await confirm({ message: '¿Eliminar este archivo?', confirmLabel: 'Eliminar', danger: true })
+    if (!ok) return
+    await api.delete(`/api/briefs/${brief.id}/files/${fileId}`)
+    setFiles(prev => prev.filter(f => f.id !== fileId))
+  }
+
+  // No longer locked — admins can edit/delete any brief including entregado/cancelado
+  const isLocked = false
 
   function togglePlatform(p: ContentPlatform) {
     setPlatforms(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p])
@@ -92,11 +175,25 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, onUp
     } finally { setSaving(false) }
   }
 
-  async function changeStatus(s: BriefStatus) {
+  async function changeStatus(s: BriefStatus, skipNote = false) {
     if (!brief) return
+    if (!skipNote && STATUS_REQUIRES_NOTE.includes(s) && (isAdmin || users.some(u => u.id === currentUserId))) {
+      setPendingStatus(s)
+      return
+    }
     const updated = await api.patch<ContentBrief>(`/api/briefs/${brief.id}/status`, { status: s })
     setStatus(s)
     onUpdate(updated)
+  }
+
+  async function confirmStatusWithNote(comment?: BriefCommentItem) {
+    if (!brief || !pendingStatus) return
+    const s = pendingStatus
+    setPendingStatus(null)
+    const updated = await api.patch<ContentBrief>(`/api/briefs/${brief.id}/status`, { status: s })
+    setStatus(s)
+    onUpdate(updated)
+    if (comment) setCommentCount(n => n + 1)
   }
 
   async function addAssignee() {
@@ -139,16 +236,29 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, onUp
 
         {/* Tabs (detail mode) */}
         {!isNew && !editing && (
-          <div className="flex border-b border-slate-100 px-6">
-            {(['info','guion','asignados','historial'] as const).map(t => (
+          <div className="flex border-b border-slate-100 px-6 overflow-x-auto">
+            {(['info','guion','comentarios','archivos','asignados','historial'] as const).map(t => (
               <button
                 key={t}
-                onClick={() => setTab(t)}
-                className={`py-2.5 px-3 text-sm font-medium border-b-2 transition-colors capitalize -mb-px ${
+                onClick={() => { setTab(t); if (t === 'archivos') loadFiles() }}
+                className={`py-2.5 px-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap -mb-px ${
                   tab === t ? 'border-[#17394f] text-[#17394f]' : 'border-transparent text-slate-500 hover:text-slate-700'
                 }`}
               >
-                {t === 'info' ? 'Info' : t === 'guion' ? 'Guión' : t === 'asignados' ? 'Asignados' : 'Historial'}
+                {t === 'info' ? 'Info'
+                  : t === 'guion' ? 'Guión'
+                  : t === 'comentarios' ? (
+                    <span className="flex items-center gap-1">
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      Comentarios
+                      {commentCount > 0 && (
+                        <span className="ml-0.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-[#17394f] text-white text-[9px] font-bold">{commentCount}</span>
+                      )}
+                    </span>
+                  )
+                  : t === 'archivos' ? `Archivos${files.length > 0 ? ` (${files.length})` : ''}`
+                  : t === 'asignados' ? 'Asignados'
+                  : 'Historial'}
               </button>
             ))}
           </div>
@@ -344,6 +454,89 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, onUp
             </div>
           )}
 
+          {!isNew && !editing && tab === 'archivos' && (
+            <div className="space-y-3">
+              {/* Preview modal */}
+              {previewFile && (
+                <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4" onClick={() => setPreviewFile(null)}>
+                  <div className="max-w-4xl w-full max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-white text-sm font-medium truncate">{previewFile.label || previewFile.originalName}</span>
+                      <button onClick={() => setPreviewFile(null)} className="text-white/60 hover:text-white ml-4"><X className="w-5 h-5" /></button>
+                    </div>
+                    {previewFile.mimeType.startsWith('image/') && (
+                      <img src={`${API_BASE}/briefs/${brief!.id}/files/${previewFile.id}/view`} alt={previewFile.originalName} className="max-h-[80vh] object-contain rounded-xl" />
+                    )}
+                    {previewFile.mimeType === 'application/pdf' && (
+                      <iframe src={`${API_BASE}/briefs/${brief!.id}/files/${previewFile.id}/view`} className="w-full h-[80vh] rounded-xl bg-white" />
+                    )}
+                    {previewFile.mimeType.startsWith('video/') && (
+                      <video src={`${API_BASE}/briefs/${brief!.id}/files/${previewFile.id}/view`} controls className="max-h-[80vh] rounded-xl w-full" />
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Upload zone */}
+              {isAdmin && (
+                <div
+                  className="border-2 border-dashed border-slate-200 rounded-xl p-5 text-center hover:border-[#17394f]/40 transition cursor-pointer bg-slate-50/50"
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) uploadFile(f) }}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) uploadFile(f); e.target.value = '' }}
+                  />
+                  {uploading
+                    ? <p className="text-sm text-slate-500">Subiendo…</p>
+                    : <>
+                        <Upload className="w-5 h-5 text-slate-400 mx-auto mb-1" />
+                        <p className="text-sm text-slate-500">Arrastra un archivo aquí o <span className="text-[#17394f] font-medium">haz clic para seleccionar</span></p>
+                        <p className="text-xs text-slate-400 mt-0.5">Imágenes, videos, PDFs, diseños…</p>
+                      </>
+                  }
+                </div>
+              )}
+
+              {/* File list */}
+              {!filesLoaded && <p className="text-sm text-slate-400 text-center py-4">Cargando archivos…</p>}
+              {filesLoaded && files.length === 0 && <p className="text-sm text-slate-400 text-center py-4">Sin archivos adjuntos</p>}
+              {files.map(f => (
+                <div key={f.id} className="flex items-center gap-3 bg-slate-50 rounded-xl px-4 py-3 border border-slate-100 group">
+                  <span className="text-slate-400 shrink-0">{fileIcon(f.mimeType)}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">{f.label || f.originalName}</p>
+                    {f.label && <p className="text-xs text-slate-400 truncate">{f.originalName}</p>}
+                    <p className="text-xs text-slate-400">{fmtBytes(f.sizeBytes)}</p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {isPreviewable(f.mimeType) && (
+                      <button onClick={() => setPreviewFile(f)} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-[#17394f] hover:bg-white transition" title="Previsualizar">
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <a
+                      href={`${API_BASE}/briefs/${brief!.id}/files/${f.id}/download`}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-[#17394f] hover:bg-white transition"
+                      title="Descargar"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </a>
+                    {isAdmin && (
+                      <button onClick={() => deleteFile(f.id)} className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-300 hover:text-red-400 hover:bg-white transition" title="Eliminar">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {!isNew && !editing && tab === 'asignados' && (
             <div className="space-y-3">
               {currentAssignees.map(a => (
@@ -377,6 +570,15 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, onUp
             </div>
           )}
 
+          {!isNew && !editing && tab === 'comentarios' && (
+            <BriefComments
+              briefId={brief!.id}
+              currentUserId={currentUserId}
+              isAdminOrLead={isAdmin}
+              teamUsers={users.map(u => ({ id: u.id, name: u.name }))}
+            />
+          )}
+
           {!isNew && !editing && tab === 'historial' && (
             <div className="space-y-2">
               {(brief?.history ?? []).length === 0
@@ -396,14 +598,37 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, onUp
         </div>
 
         {/* Footer */}
-        <div className="border-t border-slate-100 px-6 py-4 flex items-center justify-between gap-3">
-          {!isNew && !editing && !isLocked && isAdmin && (
+        <div className="border-t border-slate-100 px-6 py-4 flex items-center gap-3">
+          {!isNew && !editing && isAdmin && (
             <button onClick={() => setEditing(true)} className="text-sm text-slate-500 hover:text-slate-700">Editar</button>
           )}
           {!isNew && !editing && isAdmin && (
             <button
-              onClick={async () => { if (confirm('¿Cancelar este brief?')) { await changeStatus('cancelado'); onClose() }}}
-              className="text-sm text-red-400 hover:text-red-600 ml-auto mr-2"
+              onClick={async () => {
+                const ok = await confirm({
+                  title: 'Eliminar brief',
+                  message: `¿Eliminar "${brief?.title}"? Esta acción no se puede deshacer.`,
+                  confirmLabel: 'Eliminar',
+                  danger: true,
+                })
+                if (ok) {
+                  await api.delete(`/api/briefs/${brief!.id}`)
+                  onDelete(brief!.id)
+                  onClose()
+                }
+              }}
+              className="text-sm text-red-400 hover:text-red-600"
+            >
+              Eliminar
+            </button>
+          )}
+          {!isNew && !editing && isAdmin && brief?.status !== 'cancelado' && (
+            <button
+              onClick={async () => {
+                const ok = await confirm({ message: '¿Cancelar este brief?', confirmLabel: 'Cancelar brief' })
+                if (ok) { await changeStatus('cancelado', true); onClose() }
+              }}
+              className="text-sm text-slate-400 hover:text-slate-600"
             >
               Cancelar brief
             </button>
@@ -429,6 +654,17 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, onUp
           )}
         </div>
       </div>
+
+      {/* Status note modal */}
+      {pendingStatus && brief && (
+        <StatusNoteModal
+          briefId={brief.id}
+          newStatus={pendingStatus}
+          teamUsers={users.map(u => ({ id: u.id, name: u.name }))}
+          onConfirm={confirmStatusWithNote}
+          onCancel={() => setPendingStatus(null)}
+        />
+      )}
     </div>
   )
 }

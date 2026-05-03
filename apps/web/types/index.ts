@@ -5,10 +5,10 @@ export type ContentType = 'reel' | 'carrusel' | 'post' | 'story' | 'video'
 export type ContentPlatform = 'instagram' | 'tiktok' | 'facebook' | 'linkedin' | 'youtube'
 export type BriefStatus =
   | 'idea' | 'en_desarrollo' | 'revision_interna' | 'aprobacion_cliente'
-  | 'aprobado' | 'en_produccion' | 'entregado' | 'cancelado'
+  | 'aprobado' | 'en_produccion' | 'en_edicion' | 'entregado' | 'cancelado'
 export type BriefRole = 'guionista' | 'productor' | 'editor' | 'copy'
 export type RecurrenceFreq = 'semanal' | 'quincenal' | 'mensual'
-export type ContentPieceStatus = 'listo' | 'programado' | 'publicado' | 'en_revision' | 'pausado' | 'cancelado'
+export type ContentPieceStatus = 'listo' | 'programado' | 'publicado' | 'en_revision' | 'en_edicion' | 'pausado' | 'cancelado'
 export type CopyStatus = 'pendiente' | 'en_revision' | 'aprobado'
 
 export interface BriefAssignee {
@@ -33,7 +33,7 @@ export interface BriefHistoryEntry {
 export interface ContentBrief {
   id: string
   clientId: string
-  client: { id: string; name: string }
+  client: { id: string; name: string; color?: string | null }
   title: string
   type: ContentType
   platforms: ContentPlatform[]
@@ -59,7 +59,7 @@ export interface ContentPiece {
   briefId?: string | null
   brief?: { id: string; title: string; status: BriefStatus } | null
   clientId: string
-  client: { id: string; name: string }
+  client: { id: string; name: string; color?: string | null }
   title: string
   type: ContentType
   platforms: ContentPlatform[]
@@ -115,6 +115,7 @@ export interface User {
   avatarUrl?: string | null
   bio?: string | null
   phone?: string | null
+  whatsappNotif?: boolean
   joinedAt?: string | null
   lastSeenAt?: string | null
   createdAt: string
@@ -180,6 +181,7 @@ export interface Client {
   website?: string | null
   description?: string | null
   relationStart?: string | null
+  color?: string | null
   createdAt: string
   _count?: { projects: number }
   projects?: Project[]
@@ -327,14 +329,20 @@ export interface ProjectMetrics {
   activeMembers: number
 }
 
+export interface TaskAssignee {
+  id: string
+  name: string
+  area?: string | null
+  avatarUrl?: string | null
+}
+
 export interface Task {
   id: string
   title: string
   description?: string | null
   projectId: string
   project?: Pick<Project, 'id' | 'name'> & { client?: Pick<Client, 'id' | 'name'> }
-  assignedTo?: string | null
-  assignee?: Pick<User, 'id' | 'name' | 'area'> | null
+  assignees: TaskAssignee[]
   status: TaskStatus
   taskType?: TaskType | null
   dueDate?: string | null
@@ -403,4 +411,144 @@ export interface AdminTaskAlerts {
   overdue: number
   dueSoon: number
   blocked: number
+}
+
+// ── Docs ──────────────────────────────────────────────────────────────────────
+
+export type DocBlockType =
+  | 'paragraph' | 'heading_1' | 'heading_2' | 'heading_3'
+  | 'bulleted_list' | 'numbered_list' | 'divider'
+  | 'callout' | 'code' | 'image' | 'child_page'
+
+export interface DocBlock {
+  id: string
+  type: DocBlockType
+  content: {
+    html?: string
+    text?: string
+    language?: string
+    icon?: string
+    items?: string[]
+    url?: string
+    caption?: string
+    pageId?: string
+    title?: string
+    pageIcon?: string
+  }
+}
+
+export type DocPageStatus = 'borrador' | 'en_revision' | 'aprobado' | 'archivado'
+
+export interface DocPageSummary {
+  id: string
+  title: string
+  icon?: string | null
+  parentId?: string | null
+  sortOrder: number
+  isPublished: boolean
+  pageStatus: DocPageStatus
+  isTemplate: boolean
+  children: DocPageSummary[]
+}
+
+export interface DocPage {
+  id: string
+  title: string
+  icon?: string | null
+  cover?: string | null
+  parentId?: string | null
+  contextType: 'teamspace' | 'client' | 'workspace'
+  contextId: string
+  content: DocBlock[]
+  isPublished: boolean
+  sortOrder: number
+  pageStatus: DocPageStatus
+  isTemplate: boolean
+  templateName?: string | null
+  templateDesc?: string | null
+  approvedById?: string | null
+  approvedAt?: string | null
+  isFavorite?: boolean
+  createdBy: { id: string; name: string }
+  updatedBy?: { id: string; name: string } | null
+  approvedBy?: { id: string; name: string } | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface DocPageVersion {
+  id: string
+  version: number
+  createdAt: string
+  savedBy: { id: string; name: string }
+}
+
+export interface DocFavorite {
+  id: string
+  sortOrder: number
+  page: {
+    id: string
+    title: string
+    icon?: string | null
+    contextType: string
+    contextId: string
+    pageStatus: DocPageStatus
+    isPublished: boolean
+  }
+}
+
+export interface DocHomeStats {
+  total: number
+  statusMap: Record<string, number>
+  recentPages: Array<{
+    id: string; title: string; icon?: string | null
+    pageStatus: DocPageStatus; updatedAt: string
+    updatedBy?: { id: string; name: string } | null
+  }>
+  recentVersions: Array<{
+    id: string; version: number; createdAt: string
+    savedBy: { id: string; name: string }
+    page: { id: string; title: string; icon?: string | null }
+  }>
+}
+
+// ── Brief Comments ────────────────────────────────────────────────────────────
+
+export interface BriefCommentMention {
+  user: { id: string; name: string }
+}
+
+export interface BriefCommentItem {
+  id: string
+  briefId: string
+  parentId: string | null
+  content: string
+  isResolved: boolean
+  resolvedAt: string | null
+  createdAt: string
+  updatedAt: string
+  author: { id: string; name: string; avatarUrl?: string | null }
+  resolvedBy: { id: string; name: string } | null
+  mentions: BriefCommentMention[]
+  replies?: BriefCommentItem[]
+}
+
+// ── System settings ───────────────────────────────────────────────────────────
+
+export type SystemSettings = Record<string, string>
+
+export interface PermissionRow {
+  permission: string
+  label: string
+  module: string
+  roles: { ADMIN: boolean; LEAD: boolean; TEAM: boolean }
+}
+
+export interface SystemStats {
+  users: { total: number; byRole: Record<string, number> }
+  clients: { total: number; active: number }
+  projects: { total: number; active: number }
+  tasks: { total: number; completed: number; overdue: number }
+  content: { briefs: number; pieces: number }
+  adminTasks: number
 }

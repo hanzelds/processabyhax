@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { Project, User, ProjectMember, ProjectFile, ProjectHistoryEntry, ProjectMetrics, DeadlineStatus } from '@/types'
+import { Project, Task, User, ProjectMember, ProjectFile, ProjectHistoryEntry, ProjectMetrics, DeadlineStatus } from '@/types'
 import { PROJECT_STATUS_LABEL, PROJECT_STATUS_COLOR, formatDate } from '@/lib/utils'
 import { ProjectTabs, TabId } from './ProjectTabs'
 import { ProjectInfoBlock } from './summary/ProjectInfoBlock'
@@ -11,6 +11,9 @@ import { ProjectMembersBlock } from './members/ProjectMembersBlock'
 import { ProjectFilesTab } from './files/ProjectFilesTab'
 import { ProjectHistoryTab } from './history/ProjectHistoryTab'
 import { KanbanBoard } from '@/components/kanban/KanbanBoard'
+import { ViewToggle, ViewMode } from './tasks/ViewToggle'
+import { TaskListView } from './tasks/TaskListView'
+import { TaskCalendarView } from './tasks/TaskCalendarView'
 
 const DEADLINE_BADGE: Record<DeadlineStatus, { label: string; cls: string }> = {
   on_track: { label: '🟢 En tiempo',  cls: 'text-emerald-600' },
@@ -34,8 +37,30 @@ interface Props {
 
 export function ProjectDetailClient({ project: initialProject, metrics, members, files, historyData, users, currentUserId, isAdmin }: Props) {
   const [project, setProject] = useState(initialProject)
+  const [tasks, setTasks] = useState<Task[]>(initialProject.tasks || [])
   const [activeTab, setActiveTab] = useState<TabId>('summary')
   const [fileCount, setFileCount] = useState(files.length)
+  const [taskView, setTaskView] = useState<ViewMode>('kanban')
+  const [showNoDate, setShowNoDate] = useState(false)
+
+  // Persist view preference per project in localStorage
+  const storageKey = `project-view-${initialProject.id}`
+  useEffect(() => {
+    const saved = localStorage.getItem(storageKey)
+    if (saved === 'kanban' || saved === 'list' || saved === 'calendar') setTaskView(saved)
+  }, [storageKey])
+
+  function changeView(v: ViewMode) {
+    setTaskView(v)
+    localStorage.setItem(storageKey, v)
+    if (v !== 'calendar') setShowNoDate(false)
+  }
+
+  function handleTaskUpdate(updated: Task) {
+    setTasks(prev => prev.map(t => t.id === updated.id ? updated : t))
+  }
+
+  const noDateCount = tasks.filter(t => !t.dueDate).length
 
   const dl = DEADLINE_BADGE[project.deadlineStatus ?? 'no_date']
 
@@ -98,12 +123,41 @@ export function ProjectDetailClient({ project: initialProject, metrics, members,
       )}
 
       {activeTab === 'kanban' && (
-        <KanbanBoard
-          initialTasks={project.tasks || []}
-          projectId={project.id}
-          isAdmin={isAdmin}
-          users={users}
-        />
+        <div>
+          <ViewToggle
+            view={taskView}
+            onChange={changeView}
+            noDateCount={noDateCount}
+            onNoDateClick={() => setShowNoDate(s => !s)}
+          />
+          {taskView === 'kanban' && (
+            <KanbanBoard
+              initialTasks={tasks}
+              projectId={project.id}
+              isAdmin={isAdmin}
+              users={users}
+              onTasksChange={setTasks}
+            />
+          )}
+          {taskView === 'list' && (
+            <TaskListView
+              tasks={tasks}
+              isAdmin={isAdmin}
+              users={users}
+              onUpdate={handleTaskUpdate}
+            />
+          )}
+          {taskView === 'calendar' && (
+            <TaskCalendarView
+              tasks={tasks}
+              isAdmin={isAdmin}
+              users={users}
+              showNoDate={showNoDate}
+              onToggleNoDate={() => setShowNoDate(s => !s)}
+              onUpdate={handleTaskUpdate}
+            />
+          )}
+        </div>
       )}
 
       {activeTab === 'files' && (

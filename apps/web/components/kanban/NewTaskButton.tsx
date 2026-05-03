@@ -1,14 +1,15 @@
 'use client'
 
 import { useState } from 'react'
-import { Task, TaskStatus, TaskType, User } from '@/types'
+import { Task, TaskType, User } from '@/types'
 import { TASK_TYPE_OPTIONS } from '@/lib/utils'
 import { api } from '@/lib/api'
+import { AssigneePicker } from '@/components/tasks/AssigneePicker'
 import { Plus } from 'lucide-react'
 
 interface Props {
   projectId: string
-  status: TaskStatus
+  status: import('@/types').TaskStatus
   users: User[]
   onCreated: (task: Task) => void
 }
@@ -16,17 +17,17 @@ interface Props {
 const INPUT_CLS = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#17394f]/30 focus:border-[#17394f]/50 transition-colors'
 
 export function NewTaskButton({ projectId, status, users, onCreated }: Props) {
-  const [open, setOpen]             = useState(false)
-  const [title, setTitle]           = useState('')
+  const [open, setOpen]               = useState(false)
+  const [title, setTitle]             = useState('')
   const [description, setDescription] = useState('')
-  const [assignedTo, setAssignedTo] = useState('')
-  const [dueDate, setDueDate]       = useState('')
-  const [taskType, setTaskType]     = useState<TaskType | ''>('')
-  const [saving, setSaving]         = useState(false)
-  const [error, setError]           = useState('')
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([])
+  const [dueDate, setDueDate]         = useState('')
+  const [taskType, setTaskType]       = useState<TaskType | ''>('')
+  const [saving, setSaving]           = useState(false)
+  const [error, setError]             = useState('')
 
   function reset() {
-    setTitle(''); setDescription(''); setAssignedTo('')
+    setTitle(''); setDescription(''); setAssigneeIds([])
     setDueDate(''); setTaskType(''); setError('')
   }
 
@@ -36,11 +37,11 @@ export function NewTaskButton({ projectId, status, users, onCreated }: Props) {
     setSaving(true); setError('')
     try {
       const task = await api.post<Task>('/api/tasks', {
-        title:      title.trim(),
+        title:       title.trim(),
         description: description.trim() || undefined,
         projectId,
         status,
-        assignedTo:  assignedTo || undefined,
+        assignees:   assigneeIds.length > 0 ? assigneeIds : undefined,
         dueDate:     dueDate || undefined,
         taskType:    taskType || undefined,
       })
@@ -113,28 +114,27 @@ export function NewTaskButton({ projectId, status, users, onCreated }: Props) {
                 onChange={e => setDescription(e.target.value)}
               />
 
-              {/* Asignar + Fecha */}
-              <div className="grid grid-cols-2 gap-3">
-                {users.length > 0 && (
-                  <div>
-                    <label className="text-xs text-slate-500 mb-1 block">Asignar a</label>
-                    <select className={INPUT_CLS} value={assignedTo} onChange={e => setAssignedTo(e.target.value)}>
-                      <option value="">Sin asignar</option>
-                      {users.map(u => (
-                        <option key={u.id} value={u.id}>{u.name.split(' ')[0]}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+              {/* Asignar */}
+              {users.length > 0 && (
                 <div>
-                  <label className="text-xs text-slate-500 mb-1 block">Fecha límite</label>
-                  <input
-                    type="date"
-                    className={INPUT_CLS}
-                    value={dueDate}
-                    onChange={e => setDueDate(e.target.value)}
+                  <label className="text-xs text-slate-500 mb-1 block">Equipo</label>
+                  <AssigneePicker
+                    users={users}
+                    selectedIds={assigneeIds}
+                    onChange={setAssigneeIds}
                   />
                 </div>
+              )}
+
+              {/* Fecha */}
+              <div>
+                <label className="text-xs text-slate-500 mb-1 block">Fecha límite</label>
+                <input
+                  type="date"
+                  className={INPUT_CLS}
+                  value={dueDate}
+                  onChange={e => setDueDate(e.target.value)}
+                />
               </div>
 
               {error && <p className="text-red-500 text-xs">{error}</p>}

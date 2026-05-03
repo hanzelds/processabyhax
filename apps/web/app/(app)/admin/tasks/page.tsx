@@ -13,6 +13,7 @@ import { AdminTaskCard } from '@/components/admin-tasks/AdminTaskCard'
 import { AdminTaskForm } from '@/components/admin-tasks/AdminTaskForm'
 import { CompleteTaskModal } from '@/components/admin-tasks/CompleteTaskModal'
 import { RecurrenceForm } from '@/components/admin-tasks/RecurrenceForm'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
 
 type Tab = 'all' | 'pending' | 'recurrences' | 'completed'
 
@@ -22,6 +23,7 @@ const CATEGORY_ORDER: Record<AdminTaskCategory, number> = {
 }
 
 export default function AdminTasksPage() {
+  const confirm = useConfirm()
   const [tab, setTab] = useState<Tab>('all')
   const [tasks, setTasks] = useState<AdminTask[]>([])
   const [recurrences, setRecurrences] = useState<AdminTaskRecurrence[]>([])
@@ -71,7 +73,13 @@ export default function AdminTasksPage() {
   }
 
   async function handleDeleteRecurrence(id: string) {
-    if (!confirm('¿Eliminar esta recurrencia? Las tareas ya creadas se conservan.')) return
+    const ok = await confirm({
+      title: 'Eliminar recurrencia',
+      message: '¿Eliminar esta recurrencia? Las tareas ya creadas se conservan.',
+      confirmLabel: 'Eliminar',
+      danger: true,
+    })
+    if (!ok) return
     await api.delete(`/api/admin/tasks/recurrences/${id}`)
     setRecurrences(prev => prev.filter(r => r.id !== id))
   }

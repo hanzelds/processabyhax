@@ -24,6 +24,10 @@ export function signToken(payload: AuthPayload): string {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' })
 }
 
+export function verifyToken(token: string): AuthPayload | null {
+  try { return jwt.verify(token, JWT_SECRET) as AuthPayload } catch { return null }
+}
+
 export async function isAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const token = req.cookies?.token || req.headers.authorization?.replace('Bearer ', '')
   if (!token) {

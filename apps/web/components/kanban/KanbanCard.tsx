@@ -10,6 +10,8 @@ import {
   TASK_TYPE_LABEL, TASK_TYPE_COLOR, TASK_TYPE_OPTIONS,
 } from '@/lib/utils'
 import { api } from '@/lib/api'
+import { AssigneePicker } from '@/components/tasks/AssigneePicker'
+import { LockOpen, Trash2, Loader2, AlertTriangle } from 'lucide-react'
 
 const ALL_STATUSES: TaskStatus[] = ['PENDING', 'IN_PROGRESS', 'IN_REVIEW', 'COMPLETED', 'BLOCKED']
 
@@ -19,20 +21,24 @@ interface Props {
   task: Task
   isDragging?: boolean
   onUpdate?: (task: Task) => void
+  onDelete?: (id: string) => void
   isAdmin?: boolean
   users?: User[]
 }
 
-export function KanbanCard({ task, isDragging, onUpdate, isAdmin, users = [] }: Props) {
-  const [open, setOpen]           = useState(false)
-  const [editing, setEditing]     = useState(false)
-  const [title, setTitle]         = useState(task.title)
+export function KanbanCard({ task, isDragging, onUpdate, onDelete, isAdmin, users = [] }: Props) {
+  const [open, setOpen]               = useState(false)
+  const [editing, setEditing]         = useState(false)
+  const [reopening, setReopening]     = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting]       = useState(false)
+  const [title, setTitle]             = useState(task.title)
   const [description, setDescription] = useState(task.description || '')
-  const [assignedTo, setAssignedTo]   = useState(task.assignedTo || '')
-  const [dueDate, setDueDate]     = useState(task.dueDate ? task.dueDate.split('T')[0] : '')
-  const [status, setStatus]       = useState(task.status)
-  const [taskType, setTaskType]   = useState<TaskType | ''>(task.taskType || '')
-  const [saving, setSaving]       = useState(false)
+  const [assigneeIds, setAssigneeIds] = useState<string[]>(task.assignees.map(a => a.id))
+  const [dueDate, setDueDate]         = useState(task.dueDate ? task.dueDate.split('T')[0] : '')
+  const [status, setStatus]           = useState(task.status)
+  const [taskType, setTaskType]       = useState<TaskType | ''>(task.taskType || '')
+  const [saving, setSaving]           = useState(false)
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging: isSortDragging } = useSortable({ id: task.id })
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isSortDragging ? 0.4 : 1 }
@@ -44,7 +50,7 @@ export function KanbanCard({ task, isDragging, onUpdate, isAdmin, users = [] }: 
       const updated = await api.patch<Task>(`/api/tasks/${task.id}`, {
         title, description, status,
         taskType: taskType || null,
-        assignedTo: assignedTo || null,
+        assignees: assigneeIds,
         dueDate: dueDate || null,
       })
       onUpdate?.(updated)
@@ -55,7 +61,24 @@ export function KanbanCard({ task, isDragging, onUpdate, isAdmin, users = [] }: 
     }
   }
 
-  function closeModal() { setOpen(false); setEditing(false) }
+  function closeModal() { setOpen(false); setEditing(false); setConfirmDelete(false) }
+
+  async function reopen() {
+    setReopening(true)
+    try {
+      const updated = await api.patch<Task>(`/api/tasks/${task.id}/reopen`, {})
+      onUpdate?.(updated)
+    } finally { setReopening(false) }
+  }
+
+  async function deleteTask() {
+    setDeleting(true)
+    try {
+      await api.delete(`/api/tasks/${task.id}`)
+      onDelete?.(task.id)
+      closeModal()
+    } catch { setDeleting(false) }
+  }
 
   if (isDragging) {
     return (
@@ -94,8 +117,12 @@ export function KanbanCard({ task, isDragging, onUpdate, isAdmin, users = [] }: 
             {TASK_STATUS_LABEL[task.status]}
           </span>
           <div className="flex items-center gap-2">
-            {task.assignee && (
-              <span className="text-xs text-slate-400 truncate max-w-20">{task.assignee.name.split(' ')[0]}</span>
+            {task.assignees.length > 0 && (
+              <span className="text-xs text-slate-400 truncate max-w-24">
+                {task.assignees.length === 1
+                  ? task.assignees[0].name.split(' ')[0]
+                  : `${task.assignees[0].name.split(' ')[0]} +${task.assignees.length - 1}`}
+              </span>
             )}
             {task.dueDate && (
               <span className={`text-xs tabular-nums ${overdue ? 'text-red-500 font-medium' : 'text-slate-400'}`}>
@@ -113,7 +140,7 @@ export function KanbanCard({ task, isDragging, onUpdate, isAdmin, users = [] }: 
           onClick={closeModal}
         >
           <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 sm:p-6"
+            className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 sm:p-6 overflow-hidden"
             onClick={e => e.stopPropagation()}
           >
             {editing ? (
@@ -162,13 +189,12 @@ export function KanbanCard({ task, isDragging, onUpdate, isAdmin, users = [] }: 
 
                 {isAdmin && users.length > 0 && (
                   <div>
-                    <label className="text-xs text-slate-500 mb-1 block">Asignado a</label>
-                    <select className={INPUT_CLS} value={assignedTo} onChange={e => setAssignedTo(e.target.value)}>
-                      <option value="">Sin asignar</option>
-                      {users.map(u => (
-                        <option key={u.id} value={u.id}>{u.name}{u.area ? ` · ${u.area}` : ''}</option>
-                      ))}
-                    </select>
+                    <label className="text-xs text-slate-500 mb-1 block">Equipo asignado</label>
+                    <AssigneePicker
+                      users={users}
+                      selectedIds={assigneeIds}
+                      onChange={setAssigneeIds}
+                    />
                   </div>
                 )}
 
@@ -213,10 +239,18 @@ export function KanbanCard({ task, isDragging, onUpdate, isAdmin, users = [] }: 
                       {TASK_STATUS_LABEL[task.status]}
                     </span>
                   </div>
-                  {task.assignee && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-slate-400">Asignado</span>
-                      <span className="text-slate-700">{task.assignee.name}</span>
+                  {task.assignees.length > 0 && (
+                    <div className="flex justify-between items-start">
+                      <span className="text-slate-400 shrink-0">
+                        {task.assignees.length === 1 ? 'Asignado' : 'Equipo'}
+                      </span>
+                      <div className="flex flex-wrap gap-1 justify-end">
+                        {task.assignees.map(a => (
+                          <span key={a.id} className="text-xs bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full">
+                            {a.name.split(' ')[0]}
+                          </span>
+                        ))}
+                      </div>
                     </div>
                   )}
                   {task.dueDate && (
@@ -235,6 +269,62 @@ export function KanbanCard({ task, isDragging, onUpdate, isAdmin, users = [] }: 
                 >
                   Editar tarea
                 </button>
+
+                {isAdmin && (
+                  <div className="flex gap-2 mt-2">
+                    {task.status === 'COMPLETED' && (
+                      <button
+                        onClick={reopen}
+                        disabled={reopening}
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors disabled:opacity-50"
+                      >
+                        {reopening ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LockOpen className="w-3.5 h-3.5" />}
+                        {reopening ? 'Reabriendo…' : 'Reabrir'}
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setConfirmDelete(true)}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Eliminar
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Delete confirmation overlay */}
+            {confirmDelete && (
+              <div className="absolute inset-0 bg-white rounded-2xl p-6 flex flex-col" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-9 h-9 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                    <AlertTriangle className="w-4 h-4 text-red-500" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-slate-900 text-sm">Eliminar tarea</p>
+                    <p className="text-xs text-slate-400">Esta acción no se puede deshacer</p>
+                  </div>
+                </div>
+                <p className="text-sm text-slate-600 mb-6 flex-1">
+                  ¿Eliminar <strong>"{task.title}"</strong> permanentemente?
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={deleteTask}
+                    disabled={deleting}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-xl transition-colors disabled:opacity-50"
+                  >
+                    {deleting && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {deleting ? 'Eliminando…' : 'Sí, eliminar'}
+                  </button>
+                  <button
+                    onClick={() => setConfirmDelete(false)}
+                    className="flex-1 py-2.5 text-sm font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                </div>
               </div>
             )}
           </div>

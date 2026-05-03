@@ -20,9 +20,10 @@ interface Props {
   users: User[]
   onTaskUpdate: (task: Task) => void
   onTaskAdd: (task: Task) => void
+  onTaskDelete: (id: string) => void
 }
 
-export function KanbanColumn({ column, tasks, projectId, isAdmin, users, onTaskUpdate, onTaskAdd }: Props) {
+export function KanbanColumn({ column, tasks, projectId, isAdmin, users, onTaskUpdate, onTaskAdd, onTaskDelete }: Props) {
   const { setNodeRef, isOver } = useDroppable({ id: column.id })
 
   return (
@@ -50,7 +51,7 @@ export function KanbanColumn({ column, tasks, projectId, isAdmin, users, onTaskU
         <SortableContext items={tasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
           <div className="space-y-2">
             {tasks.map(task => (
-              <KanbanCard key={task.id} task={task} onUpdate={onTaskUpdate} isAdmin={isAdmin} users={users} />
+              <KanbanCard key={task.id} task={task} onUpdate={onTaskUpdate} onDelete={onTaskDelete} isAdmin={isAdmin} users={users} />
             ))}
           </div>
         </SortableContext>

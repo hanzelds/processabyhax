@@ -1,11 +1,17 @@
 import { prisma } from './prisma'
+import { getSettings } from './settings'
 import { sendPieceScheduledEmail, sendCopyAlertEmail } from './email'
 
 export async function runContentAlerts() {
+  const settings = await getSettings()
+  const reminderDays  = parseInt(settings.content_reminder_days_before ?? '1', 10) || 1
+  const copyAlertDays = parseInt(settings.copy_alert_days_before       ?? '2', 10) || 2
+
   const now     = new Date()
   const today   = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1)
-  const in48h   = new Date(today); in48h.setDate(in48h.getDate() + 2)
+  const reminderStart = new Date(today); reminderStart.setDate(reminderStart.getDate() + reminderDays)
+  const reminderEnd   = new Date(reminderStart); reminderEnd.setDate(reminderEnd.getDate() + 1)
+  const copyAlertEnd  = new Date(today); copyAlertEnd.setDate(copyAlertEnd.getDate() + copyAlertDays)
 
   const adminLeads = await prisma.user.findMany({
     where: { role: { in: ['ADMIN', 'LEAD'] }, status: 'ACTIVE' },
@@ -14,12 +20,12 @@ export async function runContentAlerts() {
   const emails = adminLeads.map(u => u.email)
   if (!emails.length) return
 
-  // 1. Reminder 24h before publish
-  const dueTomorrow = await prisma.contentPiece.findMany({
-    where: { scheduledDate: { gte: tomorrow, lt: in48h }, status: 'programado' },
+  // 1. Publication reminder N days before
+  const dueSoon = await prisma.contentPiece.findMany({
+    where: { scheduledDate: { gte: reminderStart, lt: reminderEnd }, status: 'programado' },
     select: { title: true, scheduledDate: true, client: { select: { name: true } } },
   })
-  for (const piece of dueTomorrow) {
+  for (const piece of dueSoon) {
     await sendPieceScheduledEmail({
       adminEmails: emails,
       pieceTitle: piece.title,
@@ -29,9 +35,9 @@ export async function runContentAlerts() {
     }).catch(console.error)
   }
 
-  // 2. Copy alert: scheduled within 48h with copy pending
+  // 2. Copy alert: scheduled within N days with copy pending
   const copyAlert = await prisma.contentPiece.findMany({
-    where: { scheduledDate: { gte: today, lte: in48h }, status: 'programado', copyStatus: 'pendiente' },
+    where: { scheduledDate: { gte: today, lte: copyAlertEnd }, status: 'programado', copyStatus: 'pendiente' },
     select: { title: true, scheduledDate: true, client: { select: { name: true } } },
   })
   for (const piece of copyAlert) {
@@ -43,5 +49,7 @@ export async function runContentAlerts() {
     }).catch(console.error)
   }
 
-  console.log(`[ContentAlerts] Checked: ${dueTomorrow.length} reminders, ${copyAlert.length} copy alerts`)
+  if (dueSoon.length > 0 || copyAlert.length > 0) {
+    console.log(`[ContentAlerts] ${dueSoon.length} recordatorio(s) publicación · ${copyAlert.length} alerta(s) copy`)
+  }
 }

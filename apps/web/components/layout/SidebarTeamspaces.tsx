@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { useSidebarStore } from '@/store/sidebarStore'
 import { Teamspace, TeamspaceProject } from '@/types'
-import { ChevronDown, ChevronRight, Lock, Eye } from 'lucide-react'
+import { ChevronDown, ChevronRight, Lock, Eye, BookOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 // ── Semaphore dot ─────────────────────────────────────────────────────────────
@@ -46,6 +46,7 @@ function ProjectRow({ project, isLast }: { project: TeamspaceProject; isLast: bo
 
 function TeamspaceRow({ ts, collapsed }: { ts: Teamspace; collapsed: boolean }) {
   const { expandedTeamspaces, toggleTeamspace } = useSidebarStore()
+  const pathname   = usePathname()
   const isExpanded = expandedTeamspaces.includes(ts.id)
   const canExpand  = ts.isMember || ts.isAdmin
   const isLocked   = !ts.isMember && ts.visibility === 'CLOSED'
@@ -104,6 +105,17 @@ function TeamspaceRow({ ts, collapsed }: { ts: Teamspace; collapsed: boolean }) 
               +{extra} más
             </Link>
           )}
+          {/* Docs link */}
+          <Link
+            href={`/teamspaces/${ts.id}?tab=docs`}
+            className={cn(
+              'flex items-center gap-2 h-7 pl-8 pr-4 transition-colors duration-100',
+              pathname.startsWith('/docs') ? 'text-[#17394f]' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-50'
+            )}
+          >
+            <BookOpen className="w-3 h-3 shrink-0" />
+            <span className="text-xs truncate flex-1">Docs</span>
+          </Link>
         </div>
       )}
     </div>

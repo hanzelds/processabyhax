@@ -13,8 +13,15 @@ import { adminTasksRouter } from './routes/adminTasks'
 import { teamspacesRouter } from './routes/teamspaces'
 import { generateRecurringAdminTasks } from './lib/recurringTasksJob'
 import { briefsRouter } from './routes/briefs'
+import { briefFilesRouter } from './routes/briefFiles'
+import { briefCommentsRouter } from './routes/briefComments'
 import { contentCalendarRouter } from './routes/contentCalendar'
 import { runContentAlerts } from './lib/contentAlertsJob'
+import { systemSettingsRouter } from './routes/systemSettings'
+import { portalRouter } from './routes/portal'
+import { docsRouter } from './routes/docs'
+import { sendTaskReminders } from './lib/taskRemindersJob'
+import { getSettings } from './lib/settings'
 
 const app = express()
 const PORT = process.env.PORT || 4100
@@ -32,6 +39,24 @@ app.use(cookieParser())
 // Static: avatars
 app.use('/api/avatars', express.static(AVATAR_UPLOAD_DIR))
 
+// Maintenance mode: block all non-auth traffic for non-admins
+app.use('/api', async (req, res, next) => {
+  if (req.path.startsWith('/auth')) return next()
+  if (req.path.startsWith('/portal')) return next()  // Portal público, sin auth
+  const settings = await getSettings()
+  if (settings.maintenance_mode !== 'true') return next()
+  // Allow if JWT indicates admin (best-effort, errors fall through to 503)
+  try {
+    const token = req.cookies?.token
+    if (token) {
+      const { verifyToken } = await import('./middleware/auth')
+      const decoded = verifyToken(token)
+      if (decoded?.role === 'ADMIN') return next()
+    }
+  } catch {}
+  res.status(503).json({ error: 'Sistema en mantenimiento. Por favor intenta más tarde.', maintenance: true })
+})
+
 app.use('/api/auth',        authRouter)
 app.use('/api/users',       usersRouter)
 app.use('/api/clients',     clientsRouter)
@@ -41,8 +66,13 @@ app.use('/api/tasks',       tasksRouter)
 app.use('/api/dashboard',   dashboardRouter)
 app.use('/api/admin/tasks', adminTasksRouter)
 app.use('/api/teamspaces',      teamspacesRouter)
-app.use('/api/briefs',          briefsRouter)
+app.use('/api/briefs',                    briefsRouter)
+app.use('/api/briefs/:id/files',          briefFilesRouter)
+app.use('/api/briefs/:id/comments',       briefCommentsRouter)
 app.use('/api/content',         contentCalendarRouter)
+app.use('/api/admin/system',    systemSettingsRouter)
+app.use('/api/portal',          portalRouter)
+app.use('/api/docs',            docsRouter)
 
 app.all('*', (_, res) => res.status(404).json({ error: 'Not found' }))
 
@@ -56,9 +86,11 @@ function scheduleDailyAt7() {
   setTimeout(() => {
     generateRecurringAdminTasks().catch(console.error)
     runContentAlerts().catch(console.error)
+    sendTaskReminders().catch(console.error)
     setInterval(() => {
       generateRecurringAdminTasks().catch(console.error)
       runContentAlerts().catch(console.error)
+      sendTaskReminders().catch(console.error)
     }, 24 * 60 * 60 * 1000)
   }, msUntil)
 }

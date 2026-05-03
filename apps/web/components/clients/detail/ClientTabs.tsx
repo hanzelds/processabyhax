@@ -1,6 +1,6 @@
 'use client'
 
-export type ClientTabId = 'profile' | 'projects' | 'metrics' | 'notes' | 'history'
+export type ClientTabId = 'profile' | 'projects' | 'metrics' | 'notes' | 'history' | 'portal' | 'docs'
 
 const TABS: { id: ClientTabId; label: string; icon: string }[] = [
   { id: 'profile',  label: 'Perfil',     icon: '◉' },
@@ -8,6 +8,8 @@ const TABS: { id: ClientTabId; label: string; icon: string }[] = [
   { id: 'metrics',  label: 'Métricas',   icon: '◈' },
   { id: 'notes',    label: 'Notas',      icon: '✎' },
   { id: 'history',  label: 'Historial',  icon: '◷' },
+  { id: 'portal',   label: 'Portal',     icon: '🔗' },
+  { id: 'docs',     label: 'Docs',       icon: '📚' },
 ]
 
 interface Props {

@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { ProjectFile, ProjectFileType } from '@/types'
 import { Upload, X, Download, FileText, FileImage, FileVideo, FileAudio, Archive, File } from 'lucide-react'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
 
 // ── Labels & colours ──────────────────────────────────────────────────────────
 
@@ -80,10 +81,12 @@ function FileRow({
   onDelete: (id: string) => void
 }) {
   const [deleting, setDeleting] = useState(false)
-  const ext = file.originalName.split('.').pop()?.toUpperCase() ?? '?'
+  const ext     = file.originalName.split('.').pop()?.toUpperCase() ?? '?'
+  const confirm = useConfirm()
 
   async function handleDelete() {
-    if (!confirm(`¿Eliminar "${file.originalName}"?`)) return
+    const ok = await confirm({ message: `¿Eliminar "${file.originalName}"?`, confirmLabel: 'Eliminar', danger: true })
+    if (!ok) return
     setDeleting(true)
     const res = await fetch(`/api/projects/${projectId}/files/${file.id}`, {
       method: 'DELETE', credentials: 'include',

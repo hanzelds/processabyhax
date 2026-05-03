@@ -72,14 +72,14 @@ clientsRouter.get('/:id/metrics', requirePermission('clients.read'), async (req,
   const [completedTasks, overdueTasks, teamMembers, lastProject] = await Promise.all([
     prisma.task.count({ where: { projectId: { in: projectIds }, status: 'COMPLETED' } }),
     prisma.task.count({ where: { projectId: { in: activeProjectIds }, status: { not: 'COMPLETED' }, dueDate: { lt: today } } }),
-    prisma.task.findMany({ where: { projectId: { in: projectIds }, assignedTo: { not: null } }, distinct: ['assignedTo'], select: { assignedTo: true, assignee: { select: { area: true } } } }),
+    prisma.taskAssignee.findMany({ where: { task: { projectId: { in: projectIds } } }, distinct: ['userId'], select: { user: { select: { area: true } } } }),
     prisma.project.findFirst({ where: { clientId }, orderBy: { createdAt: 'desc' }, select: { createdAt: true } }),
   ])
 
   // Top area calculation
   const areaCounts: Record<string, number> = {}
   teamMembers.forEach(t => {
-    const area = t.assignee?.area ?? 'Sin área'
+    const area = t.user?.area ?? 'Sin área'
     areaCounts[area] = (areaCounts[area] ?? 0) + 1
   })
   const topArea = Object.entries(areaCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null
@@ -152,7 +152,7 @@ clientsRouter.post('/', isAdmin, async (req, res) => {
 // ── PATCH /clients/:id ────────────────────────────────────────────────────────
 
 clientsRouter.patch('/:id', isAdmin, async (req, res) => {
-  const { name, contactName, contactInfo, status, industry, tier, website, description, relationStart } = req.body
+  const { name, contactName, contactInfo, status, industry, tier, website, description, relationStart, color } = req.body
   const prev = await prisma.client.findUnique({ where: { id: req.params.id } })
   if (!prev) { res.status(404).json({ error: 'Cliente no encontrado' }); return }
 
@@ -166,6 +166,7 @@ clientsRouter.patch('/:id', isAdmin, async (req, res) => {
   if (website !== undefined)  data.website = website || null
   if (description !== undefined) data.description = description || null
   if (relationStart !== undefined) data.relationStart = relationStart ? new Date(relationStart) : null
+  if (color !== undefined) data.color = color || null
 
   const client = await prisma.client.update({ where: { id: req.params.id }, data })
 
@@ -339,4 +340,31 @@ clientsRouter.get('/:id/history', requirePermission('clients.read'), async (req,
     total,
     hasMore: offset + limit < total,
   })
+})
+
+// ── DELETE /:id — delete client (admin only) ──────────────────────────────────
+clientsRouter.delete('/:id', isAdmin, async (req, res) => {
+  const client = await prisma.client.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, name: true, _count: { select: { projects: true } } },
+  })
+  if (!client) { res.status(404).json({ error: 'Cliente no encontrado' }); return }
+  if (client._count.projects > 0) {
+    res.status(400).json({ error: `Este cliente tiene ${client._count.projects} proyecto(s) asociado(s). Debes eliminarlos o reasignarlos antes de eliminar el cliente.` }); return
+  }
+
+  await prisma.$transaction([
+    prisma.clientContentApproval.deleteMany({ where: { clientId: client.id } }),
+    prisma.clientPortalToken.deleteMany({ where: { clientId: client.id } }),
+    prisma.clientMonthlyObjective.deleteMany({ where: { clientId: client.id } }),
+    prisma.contentPiece.deleteMany({ where: { clientId: client.id } }),
+    prisma.contentBrief.deleteMany({ where: { clientId: client.id } }),
+    prisma.clientHistory.deleteMany({ where: { clientId: client.id } }),
+    prisma.clientNote.deleteMany({ where: { clientId: client.id } }),
+    prisma.clientTag.deleteMany({ where: { clientId: client.id } }),
+    prisma.clientContact.deleteMany({ where: { clientId: client.id } }),
+    prisma.client.delete({ where: { id: client.id } }),
+  ])
+
+  res.json({ ok: true })
 })

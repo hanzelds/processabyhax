@@ -5,6 +5,7 @@ import { User } from '@/types'
 import { USER_ROLE_LABEL, USER_ROLE_COLOR, USER_STATUS_LABEL, USER_STATUS_DOT } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { useRouter } from 'next/navigation'
+import { useToast } from '@/components/ui/Toast'
 
 interface Props {
   user: User & { activeTasks?: number; overdueTasks?: number; activeSessions?: number; lastSeenRelative?: string | null }
@@ -15,6 +16,7 @@ interface Props {
 
 export function UserCard({ user: u, currentUserId, isAdmin, onStatusChange }: Props) {
   const router = useRouter()
+  const toast  = useToast()
 
   async function changeStatus(status: string) {
     try {
@@ -22,7 +24,7 @@ export function UserCard({ user: u, currentUserId, isAdmin, onStatusChange }: Pr
       onStatusChange?.()
       router.refresh()
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : 'Error')
+      toast.error(e instanceof Error ? e.message : 'Error')
     }
   }
 
@@ -92,7 +94,19 @@ export function UserCard({ user: u, currentUserId, isAdmin, onStatusChange }: Pr
         <div className="shrink-0">
           {u.status === 'INVITED' && (
             <button
-              onClick={async () => { await api.post(`/api/users/${u.id}/resend-invitation`, {}); alert('Invitación reenviada') }}
+              onClick={async () => {
+                try {
+                  const res = await api.post<{ ok: boolean; invitationLink: string }>(`/api/users/${u.id}/resend-invitation`, {})
+                  if (res.invitationLink) {
+                    await navigator.clipboard.writeText(res.invitationLink).catch(() => {})
+                    toast.success('Invitación reenviada — enlace copiado al portapapeles')
+                  } else {
+                    toast.success('Invitación reenviada por email')
+                  }
+                } catch (e: unknown) {
+                  toast.error(e instanceof Error ? e.message : 'Error al reenviar')
+                }
+              }}
               className="text-xs text-brand-600 hover:text-brand-800 font-medium"
             >
               Reenviar invitación

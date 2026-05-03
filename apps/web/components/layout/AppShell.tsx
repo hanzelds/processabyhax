@@ -7,6 +7,8 @@ import { Topbar } from './Topbar'
 import { BottomNav } from './BottomNav'
 import { User } from '@/types'
 import { cn } from '@/lib/utils'
+import { ToastProvider } from '@/components/ui/Toast'
+import { ConfirmProvider } from '@/components/ui/ConfirmDialog'
 
 interface AppShellProps {
   user: User
@@ -24,6 +26,8 @@ export function AppShell({ user, taskBadge, adminAlerts, children }: AppShellPro
   const isCollapsed = mounted && collapsed
 
   return (
+    <ToastProvider>
+    <ConfirmProvider>
     <div className="min-h-screen bg-gray-50">
       {/* Sidebar — desktop only (fixed) */}
       <Sidebar
@@ -52,5 +56,7 @@ export function AppShell({ user, taskBadge, adminAlerts, children }: AppShellPro
       {/* Bottom nav — mobile only */}
       <BottomNav role={user.role} />
     </div>
+    </ConfirmProvider>
+    </ToastProvider>
   )
 }

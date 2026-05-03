@@ -9,6 +9,7 @@ import { prisma } from '../lib/prisma'
 import { isAuth, isAdmin } from '../middleware/auth'
 import { Role, UserStatus } from '@prisma/client'
 import { sendInvitationEmail } from '../lib/email'
+import { getSettings } from '../lib/settings'
 import {
   ALL_PERMISSIONS, PERMISSION_LABEL, PERMISSION_MODULE,
   ROLE_DEFAULTS, getEffectivePermissions, Permission
@@ -92,8 +93,8 @@ usersRouter.get('/', isAuth, async (req, res) => {
   // Enrich with workload metrics
   const enriched = await Promise.all(users.map(async u => {
     const [activeTasks, overdueTasks] = await Promise.all([
-      prisma.task.count({ where: { assignedTo: u.id, status: { notIn: ['COMPLETED'] } } }),
-      prisma.task.count({ where: { assignedTo: u.id, status: { notIn: ['COMPLETED'] }, dueDate: { lt: today } } }),
+      prisma.task.count({ where: { assignees: { some: { userId: u.id } }, status: { notIn: ['COMPLETED'] } } }),
+      prisma.task.count({ where: { assignees: { some: { userId: u.id } }, status: { notIn: ['COMPLETED'] }, dueDate: { lt: today } } }),
     ])
     return {
       ...u,
@@ -141,10 +142,10 @@ usersRouter.get('/:id/metrics', isAuth, async (req, res) => {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
 
   const [completedTotal, completedMonth, activeTasks, overdueTasks, activity] = await Promise.all([
-    prisma.task.count({ where: { assignedTo: uid, status: 'COMPLETED' } }),
-    prisma.task.count({ where: { assignedTo: uid, status: 'COMPLETED', completedAt: { gte: monthStart } } }),
-    prisma.task.count({ where: { assignedTo: uid, status: { notIn: ['COMPLETED'] } } }),
-    prisma.task.count({ where: { assignedTo: uid, status: { notIn: ['COMPLETED'] }, dueDate: { lt: today } } }),
+    prisma.task.count({ where: { assignees: { some: { userId: uid } }, status: 'COMPLETED' } }),
+    prisma.task.count({ where: { assignees: { some: { userId: uid } }, status: 'COMPLETED', completedAt: { gte: monthStart } } }),
+    prisma.task.count({ where: { assignees: { some: { userId: uid } }, status: { notIn: ['COMPLETED'] } } }),
+    prisma.task.count({ where: { assignees: { some: { userId: uid } }, status: { notIn: ['COMPLETED'] }, dueDate: { lt: today } } }),
     prisma.activityLog.findMany({
       where: { actorId: uid },
       orderBy: { createdAt: 'desc' },
@@ -155,7 +156,7 @@ usersRouter.get('/:id/metrics', isAuth, async (req, res) => {
   // Completion rate (completed on time / total completed)
   const completedOnTime = await prisma.task.count({
     where: {
-      assignedTo: uid,
+      assignees: { some: { userId: uid } },
       status: 'COMPLETED',
       dueDate: { not: null },
       completedAt: { not: null },
@@ -169,13 +170,13 @@ usersRouter.get('/:id/metrics', isAuth, async (req, res) => {
   // Active projects (where user has at least 1 non-completed task)
   const activeProjects = await prisma.task.groupBy({
     by: ['projectId'],
-    where: { assignedTo: uid, status: { notIn: ['COMPLETED'] } },
+    where: { assignees: { some: { userId: uid } }, status: { notIn: ['COMPLETED'] } },
   })
 
   // Work by project (completed tasks)
   const workByProject = await prisma.task.groupBy({
     by: ['projectId'],
-    where: { assignedTo: uid, status: 'COMPLETED' },
+    where: { assignees: { some: { userId: uid } }, status: 'COMPLETED' },
     _count: { id: true },
     orderBy: { _count: { id: 'desc' } },
     take: 10,
@@ -212,6 +213,11 @@ usersRouter.get('/:id/metrics', isAuth, async (req, res) => {
 usersRouter.post('/', isAdmin, async (req, res) => {
   const { name, email, role, area, joinedAt } = req.body
   if (!name || !email) { res.status(400).json({ error: 'Nombre y email son requeridos' }); return }
+
+  const inviteSettings = await getSettings()
+  if (inviteSettings.require_area === 'true' && !area) {
+    res.status(400).json({ error: 'El área del usuario es obligatoria' }); return
+  }
 
   const exists = await prisma.user.findUnique({ where: { email } })
   if (exists) { res.status(409).json({ error: 'El email ya está registrado' }); return }
@@ -275,15 +281,16 @@ usersRouter.patch('/:id', isAuth, async (req, res) => {
   const isOwn = userId === req.params.id
   if (!isOwn && role !== 'ADMIN') { res.status(403).json({ error: 'Sin permiso' }); return }
 
-  const { bio, phone } = req.body
+  const { bio, phone, name, whatsappNotif } = req.body
   const data: Record<string, unknown> = {}
-  if (bio !== undefined)   data.bio   = bio || null
-  if (phone !== undefined) data.phone = phone || null
+  if (name)                       data.name          = name
+  if (bio !== undefined)          data.bio           = bio || null
+  if (phone !== undefined)        data.phone         = phone || null
+  if (whatsappNotif !== undefined) data.whatsappNotif = Boolean(whatsappNotif)
 
-  // Admin can also patch role/area/status via this route
+  // Admin can also patch role/area/email/status via this route
   if (role === 'ADMIN') {
-    const { name, email, area, joinedAt, newRole } = req.body
-    if (name)  data.name  = name
+    const { email, area, joinedAt, newRole } = req.body
     if (email) data.email = email
     if (area !== undefined) data.area = area || null
     if (joinedAt !== undefined) data.joinedAt = joinedAt ? new Date(joinedAt) : null
@@ -293,7 +300,7 @@ usersRouter.patch('/:id', isAuth, async (req, res) => {
   const user = await prisma.user.update({
     where: { id: req.params.id },
     data,
-    select: { id: true, name: true, email: true, role: true, area: true, status: true, bio: true, phone: true, joinedAt: true, avatarUrl: true },
+    select: { id: true, name: true, email: true, role: true, area: true, status: true, bio: true, phone: true, whatsappNotif: true, joinedAt: true, avatarUrl: true },
   })
   res.json(user)
 })
@@ -364,7 +371,9 @@ usersRouter.put('/:id/password', isAuth, async (req, res) => {
   if (req.user!.userId !== req.params.id) { res.status(403).json({ error: 'Solo puedes cambiar tu propia contraseña' }); return }
   const { currentPassword, newPassword } = req.body
   if (!currentPassword || !newPassword) { res.status(400).json({ error: 'Contraseña actual y nueva son requeridas' }); return }
-  if (newPassword.length < 6) { res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres' }); return }
+  const pwSettings = await getSettings()
+  const minLen = parseInt(pwSettings.password_min_length ?? '6', 10) || 6
+  if (newPassword.length < minLen) { res.status(400).json({ error: `La nueva contraseña debe tener al menos ${minLen} caracteres` }); return }
 
   const user = await prisma.user.findUnique({ where: { id: req.params.id } })
   if (!user || !(await bcrypt.compare(currentPassword, user.password))) {
