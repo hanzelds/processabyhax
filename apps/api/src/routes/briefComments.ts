@@ -66,10 +66,10 @@ briefCommentsRouter.post('/', isAuth, async (req, res) => {
   if (!content?.trim()) { res.status(400).json({ error: 'El comentario no puede estar vacío' }); return }
 
   try {
-    // Load all team users to resolve mentions
+    // Load all team users to resolve mentions (INVITED included so names resolve, but emails only go to ACTIVE)
     const allUsers = await prisma.user.findMany({
       where: { status: { in: ['ACTIVE', 'INVITED'] } },
-      select: { id: true, name: true, email: true },
+      select: { id: true, name: true, email: true, status: true },
     })
     const mentionedIds = extractMentionIds(content, allUsers).filter(id => id !== req.user!.userId)
 
@@ -95,25 +95,25 @@ briefCommentsRouter.post('/', isAuth, async (req, res) => {
       select: {
         id: true, title: true,
         client: { select: { name: true } },
-        createdBy: { select: { id: true, email: true, name: true } },
-        assignees: { select: { user: { select: { id: true, email: true, name: true } } } },
+        createdBy: { select: { id: true, email: true, name: true, status: true } },
+        assignees: { select: { user: { select: { id: true, email: true, name: true, status: true } } } },
       },
     })
     if (brief) {
       const actorId = req.user!.userId
-      // Notify all assignees + creator (except author)
+      // Notify all active assignees + creator (except author)
       const allRecipients = [
-        { id: brief.createdBy.id, email: brief.createdBy.email, name: brief.createdBy.name },
+        { id: brief.createdBy.id, email: brief.createdBy.email, name: brief.createdBy.name, status: brief.createdBy.status },
         ...brief.assignees.map(a => a.user),
       ]
       const uniqueRecipients = allRecipients.filter((u, i, arr) =>
-        u.id !== actorId && arr.findIndex(x => x.id === u.id) === i
+        u.id !== actorId && u.status === 'ACTIVE' && arr.findIndex(x => x.id === u.id) === i
       )
       sendCommentNewEmail({ brief, comment: { id: comment.id, content: comment.content }, actorName: req.user!.name!, recipients: uniqueRecipients }).catch(console.error)
 
-      // Notify mentioned users specifically
+      // Notify mentioned users specifically (only ACTIVE)
       if (mentionedIds.length) {
-        const mentionedUsers = allUsers.filter(u => mentionedIds.includes(u.id) && u.id !== actorId)
+        const mentionedUsers = allUsers.filter(u => mentionedIds.includes(u.id) && u.id !== actorId && u.status === 'ACTIVE')
         sendCommentMentionEmail({ brief, comment: { id: comment.id, content: comment.content }, actorName: req.user!.name!, mentionedUsers }).catch(console.error)
       }
     }
@@ -133,7 +133,7 @@ briefCommentsRouter.post('/:commentId/replies', isAuth, async (req, res) => {
   try {
     const parent = await prisma.briefComment.findUnique({
       where: { id: req.params.commentId },
-      select: { id: true, authorId: true, briefId: true, author: { select: { email: true, name: true } } },
+      select: { id: true, authorId: true, briefId: true, author: { select: { email: true, name: true, status: true } } },
     })
     if (!parent || parent.briefId !== req.params.id) {
       res.status(404).json({ error: 'Comentario no encontrado' }); return
@@ -141,7 +141,7 @@ briefCommentsRouter.post('/:commentId/replies', isAuth, async (req, res) => {
 
     const allUsers = await prisma.user.findMany({
       where: { status: { in: ['ACTIVE', 'INVITED'] } },
-      select: { id: true, name: true, email: true },
+      select: { id: true, name: true, email: true, status: true },
     })
     const mentionedIds = extractMentionIds(content, allUsers).filter(id => id !== req.user!.userId)
 
@@ -166,13 +166,13 @@ briefCommentsRouter.post('/:commentId/replies', isAuth, async (req, res) => {
     })
     if (brief) {
       const actorId = req.user!.userId
-      // Notify parent comment author
-      if (parent.authorId !== actorId) {
+      // Notify parent comment author (only if ACTIVE)
+      if (parent.authorId !== actorId && parent.author.status === 'ACTIVE') {
         sendCommentReplyEmail({ brief, comment: { id: reply.id, content: reply.content }, actorName: req.user!.name!, parentAuthor: parent.author }).catch(console.error)
       }
-      // Notify mentions
+      // Notify mentions (only ACTIVE)
       if (mentionedIds.length) {
-        const mentionedUsers = allUsers.filter(u => mentionedIds.includes(u.id) && u.id !== actorId)
+        const mentionedUsers = allUsers.filter(u => mentionedIds.includes(u.id) && u.id !== actorId && u.status === 'ACTIVE')
         sendCommentMentionEmail({ brief, comment: { id: reply.id, content: reply.content }, actorName: req.user!.name!, mentionedUsers }).catch(console.error)
       }
     }
@@ -204,7 +204,7 @@ briefCommentsRouter.put('/:commentId', isAuth, async (req, res) => {
       res.status(403).json({ error: 'Solo se puede editar dentro de los primeros 10 minutos' }); return
     }
 
-    // Re-extract mentions
+    // Re-extract mentions (INVITED included so names resolve; email filtering happens at send time)
     const allUsers = await prisma.user.findMany({
       where: { status: { in: ['ACTIVE', 'INVITED'] } },
       select: { id: true, name: true },
@@ -235,7 +235,7 @@ briefCommentsRouter.patch('/:commentId/resolve', isAuth, async (req, res) => {
   try {
     const existing = await prisma.briefComment.findUnique({
       where: { id: req.params.commentId },
-      select: { authorId: true, isResolved: true, briefId: true, author: { select: { email: true, name: true } } },
+      select: { authorId: true, isResolved: true, briefId: true, author: { select: { email: true, name: true, status: true } } },
     })
     if (!existing || existing.briefId !== req.params.id) {
       res.status(404).json({ error: 'Comentario no encontrado' }); return
@@ -251,8 +251,8 @@ briefCommentsRouter.patch('/:commentId/resolve', isAuth, async (req, res) => {
       select: COMMENT_SELECT,
     })
 
-    // Notify the comment author (if someone else resolved it)
-    if (existing.authorId !== req.user!.userId) {
+    // Notify the comment author (if someone else resolved it and they are ACTIVE)
+    if (existing.authorId !== req.user!.userId && existing.author.status === 'ACTIVE') {
       const brief = await prisma.contentBrief.findUnique({
         where: { id: req.params.id },
         select: { id: true, title: true, client: { select: { name: true } } },
@@ -300,7 +300,7 @@ briefCommentsRouter.post('/status-note', isAuth, async (req, res) => {
   try {
     const allUsers = await prisma.user.findMany({
       where: { status: { in: ['ACTIVE', 'INVITED'] } },
-      select: { id: true, name: true, email: true },
+      select: { id: true, name: true, email: true, status: true },
     })
     const mentionedIds = extractMentionIds(content, allUsers).filter(id => id !== req.user!.userId)
 
@@ -325,18 +325,18 @@ briefCommentsRouter.post('/status-note', isAuth, async (req, res) => {
       select: {
         id: true, title: true,
         client: { select: { name: true } },
-        createdBy: { select: { id: true, email: true, name: true } },
-        assignees: { select: { user: { select: { id: true, email: true, name: true } } } },
+        createdBy: { select: { id: true, email: true, name: true, status: true } },
+        assignees: { select: { user: { select: { id: true, email: true, name: true, status: true } } } },
       },
     })
     if (brief) {
       const actorId = req.user!.userId
       const allRecipients = [
-        { id: brief.createdBy.id, email: brief.createdBy.email, name: brief.createdBy.name },
+        { id: brief.createdBy.id, email: brief.createdBy.email, name: brief.createdBy.name, status: brief.createdBy.status },
         ...brief.assignees.map(a => a.user),
       ]
       const uniqueRecipients = allRecipients.filter((u, i, arr) =>
-        u.id !== actorId && arr.findIndex(x => x.id === u.id) === i
+        u.id !== actorId && u.status === 'ACTIVE' && arr.findIndex(x => x.id === u.id) === i
       )
       sendCommentOnStatusChangeEmail({
         brief,

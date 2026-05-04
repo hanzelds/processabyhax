@@ -334,7 +334,7 @@ const BRIEF_STATUS_LABEL: Record<string, string> = {
 }
 
 export async function sendBriefStatusEmail(params: {
-  brief: { id: string; title: string; client: { name: string }; assignees: { user: { email: string; name: string } }[] };
+  brief: { id: string; title: string; client: { name: string }; assignees: { user: { email: string; name: string; status?: string } }[] };
   status: string; actor: string;
 }): Promise<void> {
   if (!await emailEnabled('notify_brief_status')) return
@@ -352,7 +352,8 @@ export async function sendBriefStatusEmail(params: {
     const users = await (await import('../lib/prisma')).prisma.user.findMany({ where: { role: 'ADMIN', status: 'ACTIVE' }, select: { email: true } })
     to = users.map(u => u.email)
   } else if (status === 'aprobado') {
-    to = brief.assignees.map(a => a.user.email)
+    // Only notify assignees who have accepted their invitation
+    to = brief.assignees.filter(a => !a.user.status || a.user.status === 'ACTIVE').map(a => a.user.email)
   }
   if (!to.length) return
 

@@ -26,12 +26,17 @@ const TASK_TYPE_LABEL: Record<string, string> = {
 
 // Prisma include shape for task assignees
 const ASSIGNEE_INCLUDE = {
-  user: { select: { id: true, name: true, area: true, email: true, phone: true, whatsappNotif: true } },
+  user: { select: { id: true, name: true, area: true, email: true, phone: true, whatsappNotif: true, status: true } },
 }
 
 // Flatten task: transform assignees array from join-table shape to flat user objects
-function flatAssignees(assignees: { user: { id: string; name: string; area: string | null; email: string; phone: string | null; whatsappNotif: boolean } }[]) {
+function flatAssignees(assignees: { user: { id: string; name: string; area: string | null; email: string; phone: string | null; whatsappNotif: boolean; status: string } }[]) {
   return assignees.map(a => a.user)
+}
+
+// Only ACTIVE users receive email/whatsapp notifications
+function activeOnly<T extends { status: string }>(users: T[]): T[] {
+  return users.filter(u => u.status === 'ACTIVE')
 }
 
 // Auto-add member to project when task is assigned
@@ -167,7 +172,7 @@ tasksRouter.post('/', isAuth, async (req, res) => {
     await logActivity({ actorId: userId, eventType: 'task_assigned', entityType: 'task', entityId: task.id, entityName: task.title, meta: { assigned_to: effectiveAssignees, project_name: project?.name } })
     const actor = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } })
 
-    for (const assignee of taskAssignees) {
+    for (const assignee of activeOnly(taskAssignees)) {
       await ensureMember(projectId, assignee.id, userId)
       // Email (fire-and-forget)
       sendTaskAssignedEmail({
@@ -259,7 +264,7 @@ tasksRouter.patch('/:id', isAuth, async (req, res) => {
     if (addedIds.length > 0) {
       await logActivity({ actorId: user!.userId, eventType: 'task_assigned', entityType: 'task', entityId: task.id, entityName: task.title, meta: { added: addedIds, removed: removedIds, project_name: task.project.name } })
 
-      const newAssignees = flatAssignees(refreshed?.assignees ?? []).filter(a => addedIds.includes(a.id))
+      const newAssignees = activeOnly(flatAssignees(refreshed?.assignees ?? []).filter(a => addedIds.includes(a.id)))
       const actor = await prisma.user.findUnique({ where: { id: user!.userId }, select: { name: true } })
 
       for (const assignee of newAssignees) {

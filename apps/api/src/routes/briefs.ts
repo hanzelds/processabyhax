@@ -135,7 +135,7 @@ briefsRouter.patch('/:id/status', isAdminOrLead, async (req, res) => {
     select: { status: true, title: true, isRecurring: true, clientId: true,
               type: true, platforms: true, concept: true, technicalNotes: true,
               recurrenceFreq: true, createdById: true,
-              assignees: { include: { user: { select: { email: true, name: true } } } } },
+              assignees: { include: { user: { select: { email: true, name: true, status: true } } } } },
   })
   if (!prev) { res.status(404).json({ error: 'Brief no encontrado' }); return }
   // Only truly locked if already at target status
@@ -207,7 +207,7 @@ briefsRouter.post('/:id/assignees', isAdminOrLead, async (req, res) => {
 
   const [brief, user] = await Promise.all([
     prisma.contentBrief.findUnique({ where: { id: req.params.id }, select: { title: true, clientId: true, client: { select: { name: true } } } }),
-    prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } }),
+    prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true, status: true } }),
   ])
   if (!brief || !user) { res.status(404).json({ error: 'Brief o usuario no encontrado' }); return }
 
@@ -219,7 +219,7 @@ briefsRouter.post('/:id/assignees', isAdminOrLead, async (req, res) => {
   await logBriefHistory(req.params.id, req.user!.userId, 'assignee_added',
     `${user.name} asignado como ${role}`, { userId, role })
 
-  sendBriefAssignedEmail({
+  if (user.status === 'ACTIVE') sendBriefAssignedEmail({
     to: user.email,
     recipientName: user.name,
     assignerName: req.user!.name ?? 'Un admin',
