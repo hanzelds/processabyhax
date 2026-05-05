@@ -55,9 +55,14 @@ projectsRouter.get('/', isAuth, async (req, res) => {
 
   const settings = await getSettings()
   const teamSeeAll = settings.allow_team_see_all_projects === 'true'
-  const where = (user!.role === 'ADMIN' || user!.role === 'LEAD' || teamSeeAll)
+  const baseWhere = (user!.role === 'ADMIN' || user!.role === 'LEAD' || teamSeeAll)
     ? {}
     : { tasks: { some: { assignees: { some: { userId: user!.userId } } } } }
+
+  const { clientId, status: statusFilter } = req.query
+  const where: Record<string, unknown> = { ...baseWhere }
+  if (clientId) where.clientId = clientId as string
+  if (statusFilter) where.status = statusFilter as ProjectStatus
 
   const projects = await prisma.project.findMany({
     where,
@@ -71,11 +76,12 @@ projectsRouter.get('/', isAuth, async (req, res) => {
 
   // Compute metrics per project
   const result = await Promise.all(projects.map(async p => {
-    const [total, completed, overdue, blocked] = await Promise.all([
+    const [total, completed, overdue, blocked, briefCount] = await Promise.all([
       prisma.task.count({ where: { projectId: p.id } }),
       prisma.task.count({ where: { projectId: p.id, status: 'COMPLETED' } }),
       prisma.task.count({ where: { projectId: p.id, status: { not: 'COMPLETED' }, dueDate: { lt: today } } }),
       prisma.task.count({ where: { projectId: p.id, status: 'BLOCKED' } }),
+      prisma.contentBrief.count({ where: { projectId: p.id } }),
     ])
     const progressPct = total > 0 ? Math.round((completed / total) * 100) : 0
 
@@ -85,6 +91,7 @@ projectsRouter.get('/', isAuth, async (req, res) => {
       tasksCompleted: completed,
       tasksOverdue: overdue,
       tasksBlocked: blocked,
+      briefCount,
       progressPct,
       daysRemaining: daysRemaining(p.estimatedClose),
       deadlineStatus: deadlineStatus(p.estimatedClose, p.status),

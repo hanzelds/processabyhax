@@ -30,10 +30,21 @@ export interface BriefHistoryEntry {
   createdAt: string
 }
 
+export interface BriefProductionTask {
+  id: string
+  title: string
+  status: string
+  taskType?: string | null
+  dueDate?: string | null
+  assignees: { user: { id: string; name: string; avatarUrl?: string | null } }[]
+}
+
 export interface ContentBrief {
   id: string
   clientId: string
   client: { id: string; name: string; color?: string | null }
+  projectId?: string | null
+  project?: { id: string; name: string; status: string } | null
   title: string
   type: ContentType
   platforms: ContentPlatform[]
@@ -51,6 +62,7 @@ export interface ContentBrief {
   createdAt: string
   updatedAt: string
   assignees: BriefAssignee[]
+  productionTasks?: BriefProductionTask[]
   history?: BriefHistoryEntry[]
 }
 
@@ -268,6 +280,7 @@ export interface Project {
   tasksCompleted?: number
   tasksOverdue?: number
   tasksBlocked?: number
+  briefCount?: number
   progressPct?: number
   daysRemaining?: number | null
   deadlineStatus?: DeadlineStatus
@@ -342,6 +355,7 @@ export interface Task {
   description?: string | null
   projectId: string
   project?: Pick<Project, 'id' | 'name'> & { client?: Pick<Client, 'id' | 'name'> }
+  briefId?: string | null
   assignees: TaskAssignee[]
   status: TaskStatus
   taskType?: TaskType | null

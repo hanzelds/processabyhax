@@ -4,7 +4,7 @@ import { isAuth, isAdminOrLead } from '../middleware/auth'
 import { TaskStatus, TaskType } from '@prisma/client'
 import { logActivity } from '../lib/activityLogger'
 import { logProjectHistory } from '../lib/projectHistory'
-import { sendTaskAssignedEmail, sendTaskStatusChangedEmail } from '../lib/email'
+import { sendTaskAssignedEmail, sendTaskStatusChangedEmail, sendGenericEmail } from '../lib/email'
 import { getSettings } from '../lib/settings'
 import { notifyTaskAssigned, notifyTaskStatusChanged } from '../lib/whatsapp'
 
@@ -50,6 +50,33 @@ async function ensureMember(projectId: string, userId: string, addedById: string
       description: `${user?.name ?? 'Usuario'} agregado automáticamente al asignársele una tarea`,
       meta: { userId, roleInProject: 'executor' },
     })
+  }
+}
+
+// Check if all production tasks for a brief are done → notify admins
+async function checkBriefProductionComplete(briefId: string, actorName: string) {
+  const tasks = await prisma.task.findMany({ where: { briefId }, select: { status: true } })
+  if (tasks.length === 0) return
+  const allDone = tasks.every(t => t.status === 'COMPLETED')
+  if (!allDone) return
+
+  const brief = await prisma.contentBrief.findUnique({
+    where: { id: briefId },
+    select: { title: true, client: { select: { name: true } } },
+  })
+  if (!brief) return
+
+  const adminEmails = await prisma.user.findMany({
+    where: { role: { in: ['ADMIN', 'LEAD'] }, status: 'ACTIVE' },
+    select: { email: true },
+  }).then(rows => rows.map(r => r.email))
+
+  for (const email of adminEmails) {
+    sendGenericEmail({
+      to: email,
+      subject: `✅ Producción completada — ${brief.title}`,
+      html: `<p>Todas las tareas de producción del brief <strong>${brief.title}</strong> (${brief.client.name}) han sido marcadas como completadas por ${actorName}.</p>`,
+    }).catch(console.error)
   }
 }
 
@@ -346,6 +373,8 @@ tasksRouter.patch('/:id/status', isAuth, async (req, res) => {
   if (req.user!.role !== 'ADMIN' && req.user!.role !== 'LEAD' && !isAssigned) {
     res.status(403).json({ error: 'No autorizado' }); return
   }
+  // capture briefId before update (it's on the raw task, Prisma includes it automatically)
+  const briefId = (task as unknown as { briefId: string | null }).briefId
 
   const completedAt = status === 'COMPLETED' && task.status !== 'COMPLETED' ? new Date()
     : status !== 'COMPLETED' ? null : task.completedAt
@@ -384,6 +413,11 @@ tasksRouter.patch('/:id/status', isAuth, async (req, res) => {
       toStatus:    status,
       changerName: actor?.name ?? 'Usuario',
     }).catch(console.error)
+  }
+
+  // If task has a brief and just completed, check if all brief production tasks are done
+  if (status === 'COMPLETED' && briefId) {
+    checkBriefProductionComplete(briefId, actor?.name ?? 'Un usuario').catch(console.error)
   }
 
   res.json({ ...updated, assignees: flatAssignees(updated.assignees) })

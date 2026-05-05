@@ -18,6 +18,11 @@ export function TaskCard({ task, overdue }: { task: Task; overdue?: boolean }) {
               {task.project.client?.name} · {task.project.name}
             </p>
           )}
+          {task.briefId && (
+            <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-medium px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded-full border border-purple-100">
+              📄 Brief
+            </span>
+          )}
         </div>
         <div className="flex flex-col items-end gap-1 shrink-0">
           <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${TASK_STATUS_COLOR[task.status]}`}>

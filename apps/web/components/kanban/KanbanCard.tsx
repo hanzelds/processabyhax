@@ -103,12 +103,19 @@ export function KanbanCard({ task, isDragging, onUpdate, onDelete, isAdmin, user
         {...listeners}
         onClick={() => setOpen(true)}
       >
-        {/* Type badge */}
-        {typeLabel && (
-          <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-full mb-1.5 ${typeColor}`}>
-            {typeLabel}
-          </span>
-        )}
+        {/* Type badge + Brief badge */}
+        <div className="flex items-center gap-1 flex-wrap mb-1.5">
+          {typeLabel && (
+            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${typeColor}`}>
+              {typeLabel}
+            </span>
+          )}
+          {task.briefId && (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-600 border border-purple-100">
+              📄 Brief
+            </span>
+          )}
+        </div>
 
         <p className="text-sm font-medium text-slate-800 leading-snug mb-1.5">{task.title}</p>
 
@@ -218,11 +225,18 @@ export function KanbanCard({ task, isDragging, onUpdate, onDelete, isAdmin, user
               <div>
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div>
-                    {typeLabel && (
-                      <span className={`inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full mb-2 ${typeColor}`}>
-                        {typeLabel}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1 flex-wrap mb-2">
+                      {typeLabel && (
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${typeColor}`}>
+                          {typeLabel}
+                        </span>
+                      )}
+                      {task.briefId && (
+                        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-purple-50 text-purple-600 border border-purple-100">
+                          📄 Brief vinculado
+                        </span>
+                      )}
+                    </div>
                     <h3 className="font-semibold text-slate-900">{task.title}</h3>
                   </div>
                   <button onClick={closeModal} className="text-slate-400 hover:text-slate-600 text-xl leading-none shrink-0">×</button>

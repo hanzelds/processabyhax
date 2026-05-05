@@ -703,3 +703,11 @@ export async function sendCommentOnStatusChangeEmail(params: {
   const { error } = await resend.emails.send({ from: cfg.FROM, to, subject: `Nota al mover "${brief.title}" a ${label}`, html })
   if (error) console.error('[EMAIL] Comment on status change error:', error)
 }
+
+export async function sendGenericEmail(params: { to: string; subject: string; html: string }): Promise<void> {
+  if (!await emailEnabled()) return
+  const cfg = await getEmailConfig()
+  const wrapped = EMAIL_WRAPPER_OPEN + params.html + EMAIL_WRAPPER_CLOSE
+  const { error } = await resend.emails.send({ from: cfg.FROM, to: params.to, subject: params.subject, html: wrapped })
+  if (error) console.error('[EMAIL] Generic email error:', error)
+}

@@ -11,6 +11,7 @@ import { X, Plus, Trash2, ChevronDown, ChevronUp, Paperclip, Upload, FileText, I
 import { useConfirm } from '@/components/ui/ConfirmDialog'
 import { BriefComments } from './comments/BriefComments'
 import { StatusNoteModal } from './comments/StatusNoteModal'
+import { ProductionStartModal } from './ProductionStartModal'
 
 // Always use relative /api path — Next.js rewrites proxy it to localhost:4100
 const API_BASE = '/api'
@@ -95,11 +96,13 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
   const [assigneeLoading, setAssigneeLoading] = useState(false)
   const [currentAssignees, setCurrentAssignees] = useState(brief?.assignees ?? [])
 
+  const [briefData, setBriefData] = useState<ContentBrief | null>(brief)
   const [editing, setEditing]   = useState(isNew)
   const [saving, setSaving]     = useState(false)
   const [tab, setTab]           = useState<'info'|'guion'|'comentarios'|'archivos'|'asignados'|'historial'>('info')
   const [showScript, setShowScript] = useState(false)
   const [pendingStatus, setPendingStatus] = useState<BriefStatus | null>(null)
+  const [showProductionStart, setShowProductionStart] = useState(false)
   const [commentCount, setCommentCount]   = useState<number>(0)
 
   // Files tab state
@@ -177,12 +180,18 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
 
   async function changeStatus(s: BriefStatus, skipNote = false) {
     if (!brief) return
+    // en_produccion is handled by ProductionStartModal
+    if (s === 'en_produccion' && isAdmin) {
+      setShowProductionStart(true)
+      return
+    }
     if (!skipNote && STATUS_REQUIRES_NOTE.includes(s) && (isAdmin || users.some(u => u.id === currentUserId))) {
       setPendingStatus(s)
       return
     }
     const updated = await api.patch<ContentBrief>(`/api/briefs/${brief.id}/status`, { status: s })
     setStatus(s)
+    setBriefData(updated)
     onUpdate(updated)
   }
 
@@ -192,8 +201,16 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
     setPendingStatus(null)
     const updated = await api.patch<ContentBrief>(`/api/briefs/${brief.id}/status`, { status: s })
     setStatus(s)
+    setBriefData(updated)
     onUpdate(updated)
     if (comment) setCommentCount(n => n + 1)
+  }
+
+  function handleProductionStartSuccess(updated: ContentBrief) {
+    setShowProductionStart(false)
+    setStatus(updated.status)
+    setBriefData(updated)
+    onUpdate(updated)
   }
 
   async function addAssignee() {
@@ -436,6 +453,34 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
                   </div>
                 </div>
               )}
+
+              {/* Linked project */}
+              {briefData?.project && (
+                <div className="border border-slate-100 rounded-xl p-3 bg-slate-50/60">
+                  <p className={LABEL}>Proyecto vinculado</p>
+                  <p className="text-sm font-medium text-slate-800">{briefData.project.name}</p>
+                  <p className="text-xs text-slate-400 mt-0.5 capitalize">{briefData.project.status.toLowerCase()}</p>
+                </div>
+              )}
+
+              {/* Production tasks */}
+              {briefData?.productionTasks && briefData.productionTasks.length > 0 && (
+                <div>
+                  <p className={LABEL}>Tareas de producción ({briefData.productionTasks.length})</p>
+                  <div className="space-y-2">
+                    {briefData.productionTasks.map(t => {
+                      const done = t.status === 'COMPLETED'
+                      return (
+                        <div key={t.id} className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm ${done ? 'border-emerald-100 bg-emerald-50/60' : 'border-slate-100 bg-white'}`}>
+                          <div className={`w-2 h-2 rounded-full shrink-0 ${done ? 'bg-emerald-400' : 'bg-slate-300'}`} />
+                          <span className={`flex-1 ${done ? 'text-emerald-700 line-through' : 'text-slate-700'}`}>{t.title}</span>
+                          {t.assignees[0] && <span className="text-xs text-slate-400">{t.assignees[0].user.name}</span>}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -663,6 +708,15 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
           teamUsers={users.map(u => ({ id: u.id, name: u.name }))}
           onConfirm={confirmStatusWithNote}
           onCancel={() => setPendingStatus(null)}
+        />
+      )}
+
+      {/* Production start modal */}
+      {showProductionStart && briefData && (
+        <ProductionStartModal
+          brief={briefData}
+          onSuccess={handleProductionStartSuccess}
+          onCancel={() => setShowProductionStart(false)}
         />
       )}
     </div>

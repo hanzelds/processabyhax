@@ -11,12 +11,20 @@ const BRIEF_SELECT = {
   concept: true, script: true, referencesUrls: true, copyDraft: true,
   hashtags: true, technicalNotes: true, clientApprovalNotes: true,
   isRecurring: true, recurrenceFreq: true, createdAt: true, updatedAt: true,
-  clientId: true,
+  clientId: true, projectId: true,
   client: { select: { id: true, name: true, color: true } },
+  project: { select: { id: true, name: true, status: true } },
   createdBy: { select: { id: true, name: true } },
   assignees: {
     include: { user: { select: { id: true, name: true, email: true, area: true, avatarUrl: true } } },
     orderBy: { assignedAt: 'asc' as const },
+  },
+  productionTasks: {
+    select: {
+      id: true, title: true, status: true, taskType: true, dueDate: true,
+      assignees: { include: { user: { select: { id: true, name: true, avatarUrl: true } } } },
+    },
+    orderBy: { createdAt: 'asc' as const },
   },
 }
 
@@ -248,6 +256,73 @@ briefsRouter.get('/:id/history', isAuth, async (req, res) => {
     orderBy: { createdAt: 'desc' },
   })
   res.json(history)
+})
+
+// ── PATCH /:id/project — link/unlink a project ───────────────────────────────
+briefsRouter.patch('/:id/project', isAdminOrLead, async (req, res) => {
+  const { projectId } = req.body
+  const brief = await prisma.contentBrief.update({
+    where: { id: req.params.id },
+    data: { projectId: projectId ?? null },
+    select: BRIEF_SELECT,
+  })
+  await logBriefHistory(brief.id, req.user!.userId, 'project_linked',
+    projectId ? `Vinculado al proyecto` : 'Proyecto desvinculado', { projectId })
+  res.json(brief)
+})
+
+// ── POST /:id/start-production — link project + auto-create tasks ─────────────
+briefsRouter.post('/:id/start-production', isAdminOrLead, async (req, res) => {
+  const { projectId, dueDate } = req.body
+  if (!projectId) { res.status(400).json({ error: 'projectId es requerido' }); return }
+
+  const brief = await prisma.contentBrief.findUnique({
+    where: { id: req.params.id },
+    select: {
+      id: true, title: true, status: true, projectId: true,
+      assignees: { include: { user: { select: { id: true, name: true, email: true, area: true, status: true } } } },
+    },
+  })
+  if (!brief) { res.status(404).json({ error: 'Brief no encontrado' }); return }
+
+  const ROLE_TASK_TITLE: Record<string, string> = {
+    editor:     'Producción',
+    copy:       'Copy final',
+    guionista:  'Revisión de guión',
+  }
+
+  const due = dueDate ? new Date(dueDate) : null
+
+  // Build tasks for each assignee that has a known role
+  const tasksToCreate = brief.assignees
+    .filter(a => ROLE_TASK_TITLE[a.role])
+    .map(a => ({
+      title:       `${ROLE_TASK_TITLE[a.role]} — ${brief.title}`,
+      projectId,
+      briefId:     brief.id,
+      dueDate:     due,
+      status:      'PENDING' as const,
+      taskType:    'PRODUCCION' as const,
+      assignees:   { create: [{ userId: a.user.id, assignedAt: new Date() }] },
+    }))
+
+  // Update brief status + link project in one transaction
+  await prisma.$transaction([
+    prisma.contentBrief.update({
+      where: { id: brief.id },
+      data: { status: 'en_produccion', projectId },
+    }),
+    ...tasksToCreate.map(t => prisma.task.create({ data: t })),
+  ])
+
+  await logBriefHistory(brief.id, req.user!.userId, 'production_started',
+    `Producción iniciada — ${tasksToCreate.length} tarea(s) creada(s)`, { projectId })
+
+  const updated = await prisma.contentBrief.findUnique({
+    where: { id: brief.id },
+    select: BRIEF_SELECT,
+  })
+  res.json(updated)
 })
 
 // ── DELETE /:id — delete brief (admin only) ───────────────────────────────────
