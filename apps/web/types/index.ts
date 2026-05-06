@@ -558,6 +558,73 @@ export interface PermissionRow {
   roles: { ADMIN: boolean; LEAD: boolean; TEAM: boolean }
 }
 
+// ── Scripts (Guiones) ─────────────────────────────────────────────────────────
+
+export type ScriptStatus = 'borrador' | 'en_revision' | 'aprobado' | 'archivado'
+
+export interface ReelScene {
+  id: string
+  order: number
+  duration: string
+  visual: string
+  audio: string
+  textOverlay: string
+  music: string
+}
+
+export interface CarouselSlide {
+  id: string
+  order: number
+  headline: string
+  body: string
+  imageDesc: string
+  cta: string
+}
+
+export interface Script {
+  id: string
+  briefId: string
+  brief: { id: string; title: string; type: string; status: string; concept?: string | null; script?: string | null }
+  clientId: string
+  client: { id: string; name: string }
+  title: string
+  type: ContentType
+  status: ScriptStatus
+  content: ReelScene[] | CarouselSlide[]
+  notes?: string | null
+  createdById: string
+  createdBy: { id: string; name: string; avatarUrl?: string | null }
+  updatedBy?: { id: string; name: string; avatarUrl?: string | null } | null
+  createdAt: string
+  updatedAt: string
+  _count: { versions: number; comments: number }
+}
+
+export interface ScriptVersion {
+  id: string
+  scriptId: string
+  version: number
+  title: string
+  content: ReelScene[] | CarouselSlide[]
+  notes?: string | null
+  savedBy: { id: string; name: string; avatarUrl?: string | null }
+  createdAt: string
+}
+
+export interface ScriptComment {
+  id: string
+  scriptId: string
+  authorId: string
+  author: { id: string; name: string; avatarUrl?: string | null }
+  parentId?: string | null
+  content: string
+  sceneIndex?: number | null
+  isResolved: boolean
+  createdAt: string
+  updatedAt: string
+  replies?: ScriptComment[]
+}
+
 export interface SystemStats {
   users: { total: number; byRole: Record<string, number> }
   clients: { total: number; active: number }

@@ -27,7 +27,6 @@ interface PageProps {
 export default async function CalendarPage({ searchParams }: PageProps) {
   const me = await serverFetch<User>('/api/auth/me')
   if (!me) redirect('/login')
-  if (me.role === 'TEAM') redirect('/dashboard')
 
   const clients = await serverFetch<Client[]>('/api/clients') ?? []
   const params = await searchParams

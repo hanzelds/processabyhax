@@ -15,7 +15,7 @@ interface Props {
   onFocus: () => void
   onArrowUp: () => void
   onArrowDown: () => void
-  onSlash: (position: { top: number; left: number }) => void
+  onSlash: (position: { top: number; left: number }, filter: string) => void
   onSlashClose: () => void
 }
 
@@ -46,6 +46,13 @@ export function TextBlock({ block, focused, readOnly, blockRef, onUpdate, onEnte
   }, []) // Only on mount — don't re-sync on every keystroke (that resets cursor)
 
   function handleKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    // Formatting shortcuts
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+      if (e.key === 'b') { e.preventDefault(); document.execCommand('bold',          false); return }
+      if (e.key === 'i') { e.preventDefault(); document.execCommand('italic',        false); return }
+      if (e.key === 'u') { e.preventDefault(); document.execCommand('underline',     false); return }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       onEnter()
@@ -96,7 +103,8 @@ export function TextBlock({ block, focused, readOnly, blockRef, onUpdate, onEnte
 
     if (text === '/' || text.startsWith('/')) {
       const rect = el.getBoundingClientRect()
-      onSlash({ top: rect.bottom + 4, left: rect.left })
+      const filter = text.startsWith('/') ? text.slice(1) : ''
+      onSlash({ top: rect.bottom + 4, left: rect.left }, filter)
     } else {
       onSlashClose()
     }

@@ -27,7 +27,13 @@ export function InlineToolbar({ onClose }: Props) {
       const range = sel.getRangeAt(0)
       const rect = range.getBoundingClientRect()
       if (rect.width === 0) { setPos(null); return }
-      setPos({ top: rect.top - 44, left: rect.left + rect.width / 2 - 120 })
+      const toolbarH = 44
+      const above = rect.top - toolbarH - 4
+      const below = rect.bottom + 4
+      setPos({
+        top:  above > 8 ? above : below,
+        left: rect.left + rect.width / 2 - 120,
+      })
       setActiveFormats({
         bold:          document.queryCommandState('bold'),
         italic:        document.queryCommandState('italic'),

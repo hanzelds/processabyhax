@@ -42,13 +42,14 @@ async function getLeadEmails() {
 
 // ── GET / — list briefs ───────────────────────────────────────────────────────
 briefsRouter.get('/', isAuth, async (req, res) => {
-  const { clientId, type, status } = req.query
+  const { clientId, type, status, search, limit } = req.query
   const { user } = req
 
   const where: Record<string, unknown> = {}
   if (clientId) where.clientId = clientId as string
   if (type)     where.type     = type as ContentType
   if (status)   where.status   = status as BriefStatus
+  if (search)   where.title    = { contains: search as string, mode: 'insensitive' }
 
   // Team users only see briefs they're assigned to
   if (user!.role === 'TEAM') {
@@ -59,6 +60,7 @@ briefsRouter.get('/', isAuth, async (req, res) => {
     where,
     select: BRIEF_SELECT,
     orderBy: { updatedAt: 'desc' },
+    take: limit ? parseInt(limit as string) : undefined,
   })
   res.json(briefs)
 })

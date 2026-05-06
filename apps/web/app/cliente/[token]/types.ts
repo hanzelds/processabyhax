@@ -16,6 +16,8 @@ export type PortalPiece = {
   publicationNotes: string | null
   scheduledDate: string | null
   scheduledTime: string | null
+  briefId: string | null
+  coverImageFileId: string | null
   portalApproval: PortalApproval | null
 }
 

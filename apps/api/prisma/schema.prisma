@@ -167,6 +167,13 @@ model User {
   briefComments       BriefComment[]           @relation("BriefCommentAuthor")
   resolvedComments    BriefComment[]           @relation("BriefCommentResolver")
   commentMentions     CommentMention[]         @relation("CommentMentionUser")
+  driveConnections    DriveConnection[]
+  // Scripts
+  scriptsCreated      Script[]             @relation("ScriptCreator")
+  scriptsUpdated      Script[]             @relation("ScriptUpdater")
+  scriptVersions      ScriptVersion[]      @relation("ScriptVersionSaver")
+  scriptComments      ScriptComment[]      @relation("ScriptCommentAuthor")
+  scriptMentions      ScriptCommentMention[] @relation("ScriptMentionUser")
 
   @@map("users")
 }
@@ -266,6 +273,7 @@ model Client {
   portalTokens  ClientPortalToken[]
   monthlyObjectives ClientMonthlyObjective[]
   contentApprovals  ClientContentApproval[]
+  scripts       Script[]          @relation("ClientScripts")
 
   @@map("clients")
 }
@@ -669,6 +677,7 @@ model ContentBrief {
   files               BriefFile[]
   comments            BriefComment[]
   productionTasks     Task[]          @relation("BriefTasks")
+  scripts             Script[]        @relation("BriefScripts")
 
   @@index([clientId, status])
   @@index([status])
@@ -933,4 +942,99 @@ model ClientContentApproval {
   @@index([briefId])
   @@index([clientId, actionedAt(sort: Desc)])
   @@map("client_content_approvals")
+}
+
+model DriveConnection {
+  id            String    @id @default(cuid())
+  accessToken   String    @map("access_token") @db.Text
+  refreshToken  String    @map("refresh_token") @db.Text
+  expiryDate    BigInt    @map("expiry_date")
+  connectedById String    @map("connected_by_id")
+  connectedBy   User      @relation(fields: [connectedById], references: [id])
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@map("drive_connections")
+}
+
+// ── Scripts (Guiones) ─────────────────────────────────────────────────────────
+
+enum ScriptStatus {
+  borrador
+  en_revision
+  aprobado
+  archivado
+}
+
+model Script {
+  id          String        @id @default(cuid())
+  briefId     String        @map("brief_id")
+  brief       ContentBrief  @relation("BriefScripts", fields: [briefId], references: [id], onDelete: Cascade)
+  clientId    String        @map("client_id")
+  client      Client        @relation("ClientScripts", fields: [clientId], references: [id])
+  title       String
+  type        ContentType
+  status      ScriptStatus  @default(borrador)
+  content     Json          @default("[]")
+  notes       String?
+  createdById String        @map("created_by_id")
+  createdBy   User          @relation("ScriptCreator", fields: [createdById], references: [id])
+  updatedById String?       @map("updated_by_id")
+  updatedBy   User?         @relation("ScriptUpdater", fields: [updatedById], references: [id])
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  versions    ScriptVersion[]
+  comments    ScriptComment[]
+
+  @@index([briefId])
+  @@index([clientId, status])
+  @@map("scripts")
+}
+
+model ScriptVersion {
+  id        String   @id @default(cuid())
+  scriptId  String   @map("script_id")
+  script    Script   @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  version   Int
+  title     String
+  content   Json
+  notes     String?
+  savedById String   @map("saved_by_id")
+  savedBy   User     @relation("ScriptVersionSaver", fields: [savedById], references: [id])
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([scriptId, version])
+  @@index([scriptId, createdAt(sort: Desc)])
+  @@map("script_versions")
+}
+
+model ScriptComment {
+  id         String          @id @default(cuid())
+  scriptId   String          @map("script_id")
+  script     Script          @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  authorId   String          @map("author_id")
+  author     User            @relation("ScriptCommentAuthor", fields: [authorId], references: [id])
+  parentId   String?         @map("parent_id")
+  parent     ScriptComment?  @relation("ScriptCommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies    ScriptComment[] @relation("ScriptCommentReplies")
+  content    String
+  sceneIndex Int?            @map("scene_index")
+  isResolved Boolean         @default(false) @map("is_resolved")
+  createdAt  DateTime        @default(now()) @map("created_at")
+  updatedAt  DateTime        @updatedAt @map("updated_at")
+  mentions   ScriptCommentMention[]
+
+  @@index([scriptId, parentId])
+  @@map("script_comments")
+}
+
+model ScriptCommentMention {
+  id        String        @id @default(cuid())
+  commentId String        @map("comment_id")
+  comment   ScriptComment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  userId    String        @map("user_id")
+  user      User          @relation("ScriptMentionUser", fields: [userId], references: [id])
+
+  @@unique([commentId, userId])
+  @@map("script_comment_mentions")
 }

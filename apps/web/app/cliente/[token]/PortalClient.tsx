@@ -267,9 +267,190 @@ function ReviewCard({
   )
 }
 
+// ── Feed preview ─────────────────────────────────────────────────────────────
+
+const TYPE_BG: Record<string, string> = {
+  post:     'bg-gradient-to-br from-rose-400 to-pink-600',
+  carrusel: 'bg-gradient-to-br from-violet-400 to-purple-600',
+  reel:     'bg-gradient-to-br from-orange-400 to-red-500',
+  story:    'bg-gradient-to-br from-yellow-400 to-orange-500',
+  video:    'bg-gradient-to-br from-blue-400 to-indigo-600',
+}
+
+function pieceImageUrl(piece: PortalPiece): string | null {
+  if (piece.briefId && piece.coverImageFileId)
+    return `${API_PATH}/briefs/${piece.briefId}/files/${piece.coverImageFileId}/view`
+  return null
+}
+
+function StoryCircle({ piece, onClick }: { piece: PortalPiece; onClick: () => void }) {
+  const approval = approvalOf(piece)
+  const ring = approval === 'approved'
+    ? 'ring-2 ring-emerald-400 ring-offset-2'
+    : approval === 'changes'
+    ? 'ring-2 ring-amber-400 ring-offset-2'
+    : 'ring-2 ring-slate-300 ring-offset-2'
+  const imgUrl = pieceImageUrl(piece)
+  return (
+    <button onClick={onClick} className="flex flex-col items-center gap-1 shrink-0 w-16">
+      <div className={`w-14 h-14 rounded-full ${ring} overflow-hidden flex items-center justify-center ${!imgUrl ? TYPE_BG[piece.type] ?? 'bg-slate-400' : ''}`}>
+        {imgUrl
+          ? <img src={imgUrl} alt={piece.title} className="w-full h-full object-cover" />
+          : <span className="text-2xl">{TYPE_ICON[piece.type] ?? '📄'}</span>
+        }
+      </div>
+      <span className="text-[10px] text-slate-500 text-center leading-tight line-clamp-2 w-full">{piece.title}</span>
+    </button>
+  )
+}
+
+function FeedCell({ piece, onClick }: { piece: PortalPiece; onClick: () => void }) {
+  const approval = approvalOf(piece)
+  const imgUrl = pieceImageUrl(piece)
+  return (
+    <button
+      onClick={onClick}
+      className="relative aspect-square w-full overflow-hidden rounded-lg"
+    >
+      {imgUrl ? (
+        <img src={imgUrl} alt={piece.title} className="absolute inset-0 w-full h-full object-cover" />
+      ) : (
+        <div className={`absolute inset-0 ${TYPE_BG[piece.type] ?? 'bg-slate-400'} flex flex-col items-center justify-center gap-1 p-2`}>
+          <span className="text-3xl">{TYPE_ICON[piece.type] ?? '📄'}</span>
+          <span className="text-[10px] font-semibold text-white/90 text-center leading-tight line-clamp-2">{piece.title}</span>
+        </div>
+      )}
+      {/* status badge */}
+      <div className="absolute top-1.5 right-1.5">
+        {approval === 'approved' && <span className="text-sm">✅</span>}
+        {approval === 'changes' && <span className="text-sm">⚠️</span>}
+      </div>
+      {/* date + title overlay when image is present */}
+      {imgUrl && (
+        <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent px-1.5 pt-4 pb-1">
+          <span className="text-[9px] text-white/90 font-medium line-clamp-1">{piece.title}</span>
+          {piece.scheduledDate && (
+            <span className="block text-[9px] text-white/60">{fmtDate(piece.scheduledDate)}</span>
+          )}
+        </div>
+      )}
+      {/* date badge when no image */}
+      {!imgUrl && piece.scheduledDate && (
+        <div className="absolute bottom-0 inset-x-0 bg-black/40 px-1.5 py-0.5">
+          <span className="text-[9px] text-white/90 font-medium">{fmtDate(piece.scheduledDate)}</span>
+        </div>
+      )}
+    </button>
+  )
+}
+
+function FeedDetailSheet({ piece, onClose, onApprove, onChanges }: {
+  piece: PortalPiece
+  onClose: () => void
+  onApprove: () => void
+  onChanges: (fb: string) => void
+}) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-end" onClick={onClose}>
+      <div
+        className="bg-white w-full max-h-[85vh] overflow-y-auto rounded-t-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mt-3 mb-4" />
+        <ReviewCard
+          id={piece.id}
+          title={piece.title}
+          type={piece.type}
+          platforms={piece.platforms}
+          scheduledDate={piece.scheduledDate}
+          scheduledTime={piece.scheduledTime}
+          copy={piece.copy}
+          hashtags={piece.hashtags}
+          notes={piece.publicationNotes}
+          refsUrls={piece.referencesUrls}
+          approval={approvalOf(piece)}
+          priorFeedback={piece.portalApproval?.feedback}
+          onApprove={onApprove}
+          onChanges={onChanges}
+        />
+        <div className="h-8" />
+      </div>
+    </div>
+  )
+}
+
+function FeedView({ pieces, onApprove, onChanges }: {
+  pieces: PortalPiece[]
+  onApprove: (id: string) => void
+  onChanges: (id: string, fb: string) => void
+}) {
+  const [selected, setSelected] = useState<PortalPiece | null>(null)
+
+  const sorted = [...pieces].sort((a, b) => {
+    if (!a.scheduledDate && !b.scheduledDate) return 0
+    if (!a.scheduledDate) return 1
+    if (!b.scheduledDate) return -1
+    return a.scheduledDate.localeCompare(b.scheduledDate)
+  })
+
+  const stories = sorted.filter(p => p.type === 'story')
+  const grid    = sorted.filter(p => p.type !== 'story')
+
+  if (pieces.length === 0) {
+    return (
+      <div className="text-center py-16">
+        <p className="text-4xl mb-3">📭</p>
+        <p className="font-bold text-slate-700">Sin piezas este mes</p>
+      </div>
+    )
+  }
+
+  const handleApprove = async (piece: PortalPiece) => {
+    await onApprove(piece.id)
+    setSelected(prev => prev?.id === piece.id ? { ...prev, portalApproval: { action: 'approved', changeType: null, feedback: null } } : prev)
+  }
+
+  const handleChanges = async (piece: PortalPiece, fb: string) => {
+    await onChanges(piece.id, fb)
+    setSelected(prev => prev?.id === piece.id ? { ...prev, portalApproval: { action: 'changes_requested', changeType: null, feedback: fb } } : prev)
+  }
+
+  return (
+    <>
+      {/* Stories row */}
+      {stories.length > 0 && (
+        <div className="flex gap-3 overflow-x-auto pb-2 mb-4 -mx-4 px-4">
+          {stories.map(p => (
+            <StoryCircle key={p.id} piece={p} onClick={() => setSelected(p)} />
+          ))}
+        </div>
+      )}
+
+      {/* Grid */}
+      {grid.length > 0 && (
+        <div className="grid grid-cols-3 gap-1">
+          {grid.map(p => (
+            <FeedCell key={p.id} piece={p} onClick={() => setSelected(p)} />
+          ))}
+        </div>
+      )}
+
+      {/* Detail sheet */}
+      {selected && (
+        <FeedDetailSheet
+          piece={selected}
+          onClose={() => setSelected(null)}
+          onApprove={() => handleApprove(selected)}
+          onChanges={(fb) => handleChanges(selected, fb)}
+        />
+      )}
+    </>
+  )
+}
+
 // ── Main portal ───────────────────────────────────────────────────────────────
 
-type Tab = 'pendiente' | 'aprobado' | 'briefs'
+type Tab = 'pendiente' | 'aprobado' | 'feed' | 'briefs'
 
 export function PortalClient({ data: initialData, token }: { data: PortalData; token: string }) {
   const [data, setData] = useState(initialData)
@@ -390,6 +571,7 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
           {([
             ['pendiente', `Pendiente${pending.length > 0 ? ` (${pending.length + briefsPending.length})` : ''}`],
             ['aprobado', `Aprobado${approved.length > 0 ? ` (${approved.length})` : ''}`],
+            ['feed', 'Feed'],
             ...(data.briefs.length > 0 ? [['briefs', `Briefs${data.briefs.length > 0 ? ` (${data.briefs.length})` : ''}`]] : []),
           ] as [Tab, string][]).map(([t, label]) => (
             <button
@@ -525,6 +707,15 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
               ))
             )}
           </>
+        )}
+
+        {/* ── TAB: Feed ── */}
+        {tab === 'feed' && (
+          <FeedView
+            pieces={allPieces}
+            onApprove={async (id) => { updatePiece(id, 'approved'); await fetch(`${API_PATH}/portal/${token}/approve/${id}`, { method: 'POST' }) }}
+            onChanges={async (id, fb) => { updatePiece(id, 'changes_requested', fb); await fetch(`${API_PATH}/portal/${token}/changes/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ changeType: 'other', feedback: fb }) }) }}
+          />
         )}
 
         {/* ── TAB: Briefs ── */}

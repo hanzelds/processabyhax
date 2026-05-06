@@ -23,7 +23,7 @@ interface Props {
   onFocus: (id: string) => void
   onArrowUp: (id: string) => void
   onArrowDown: (id: string) => void
-  onSlash: (id: string, position: { top: number; left: number }) => void
+  onSlash: (id: string, position: { top: number; left: number }, filter: string) => void
   onSlashClose: () => void
   onMoveUp: (id: string) => void
   onMoveDown: (id: string) => void
@@ -134,7 +134,7 @@ export function DocBlockRenderer({
           onFocus={() => onFocus(block.id)}
           onArrowUp={() => onArrowUp(block.id)}
           onArrowDown={() => onArrowDown(block.id)}
-          onSlash={pos => onSlash(block.id, pos)}
+          onSlash={(pos, filter) => onSlash(block.id, pos, filter)}
           onSlashClose={onSlashClose}
         />
       )}

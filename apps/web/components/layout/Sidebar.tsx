@@ -9,7 +9,7 @@ import { User } from '@/types'
 import { SidebarTeamspaces } from './SidebarTeamspaces'
 import {
   CheckSquare, FolderKanban, Users, Building2,
-  Settings, LogOut, ChevronLeft, ChevronRight, CalendarDays, Clapperboard, SlidersHorizontal, BookOpen, type LucideIcon,
+  Settings, LogOut, ChevronLeft, ChevronRight, CalendarDays, Clapperboard, SlidersHorizontal, BookOpen, HardDrive, ScrollText, type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -111,12 +111,14 @@ function SectionLabel({ label, collapsed }: { label: string; collapsed: boolean 
 
 function getNavSections(role: string, permissions: string[]) {
   const isTeam = role === 'TEAM'
-  const canSeeCalendar    = !isTeam || permissions.includes('content.calendar')
-  const canSeePreproduccion = !isTeam || permissions.includes('content.preproduccion')
+  const canSeeCalendar    = true
+  const canSeePreproduccion = true
   const contentItems = [
-    ...(canSeeCalendar     ? [{ href: '/content/calendar', label: 'Calendario',    icon: CalendarDays, hasBadge: false }] : []),
-    ...(canSeePreproduccion ? [{ href: '/content/briefs',  label: 'Preproducción', icon: Clapperboard, hasBadge: false }] : []),
-    { href: '/docs', label: 'Docs', icon: BookOpen, hasBadge: false },
+    ...(canSeeCalendar     ? [{ href: '/content/calendar',  label: 'Calendario',    icon: CalendarDays, hasBadge: false }] : []),
+    ...(canSeePreproduccion ? [{ href: '/content/briefs',   label: 'Preproducción', icon: Clapperboard, hasBadge: false }] : []),
+    { href: '/content/scripts', label: 'Guiones', icon: ScrollText, hasBadge: false },
+    { href: '/docs',   label: 'Docs',  icon: BookOpen,  hasBadge: false },
+    { href: '/drive',  label: 'Drive', icon: HardDrive, hasBadge: false },
   ]
 
   const sections = [

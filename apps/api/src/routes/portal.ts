@@ -182,6 +182,17 @@ portalRouter.get('/:token', async (req, res) => {
         id: true, title: true, type: true, platforms: true, status: true,
         copy: true, hashtags: true, referencesUrls: true, publicationNotes: true,
         scheduledDate: true, scheduledTime: true,
+        briefId: true,
+        brief: {
+          select: {
+            files: {
+              where: { mimeType: { startsWith: 'image/' } },
+              select: { id: true },
+              orderBy: { createdAt: 'asc' },
+              take: 1,
+            },
+          },
+        },
       },
     }),
     prisma.contentBrief.findMany({
@@ -224,6 +235,8 @@ portalRouter.get('/:token', async (req, res) => {
   const annotatedPieces = pieces.map(p => ({
     ...p,
     scheduledDate: p.scheduledDate ? p.scheduledDate.toISOString().split('T')[0] : null,
+    coverImageFileId: p.brief?.files?.[0]?.id ?? null,
+    brief: undefined,
     portalApproval: pieceApprovalMap[p.id] ?? null,
   }))
 

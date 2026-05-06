@@ -20,6 +20,8 @@ import { runContentAlerts } from './lib/contentAlertsJob'
 import { systemSettingsRouter } from './routes/systemSettings'
 import { portalRouter } from './routes/portal'
 import { docsRouter } from './routes/docs'
+import { driveRouter } from './routes/drive'
+import scriptsRouter from './routes/scripts'
 import { sendTaskReminders } from './lib/taskRemindersJob'
 import { getSettings } from './lib/settings'
 
@@ -73,6 +75,8 @@ app.use('/api/content',         contentCalendarRouter)
 app.use('/api/admin/system',    systemSettingsRouter)
 app.use('/api/portal',          portalRouter)
 app.use('/api/docs',            docsRouter)
+app.use('/api/drive',           driveRouter)
+app.use('/api/scripts',         scriptsRouter)
 
 app.all('*', (_, res) => res.status(404).json({ error: 'Not found' }))
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { ContentBrief, Project, BriefRole } from '@/types'
 import { api } from '@/lib/api'
 import { X, Loader2, FolderOpen, CheckCircle2 } from 'lucide-react'
@@ -56,7 +57,7 @@ export function ProductionStartModal({ brief, onSuccess, onCancel }: Props) {
     }
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[9900] flex items-center justify-center bg-black/50 p-4" onClick={onCancel}>
       <div
         className="bg-white rounded-2xl shadow-2xl w-full max-w-md"
@@ -171,6 +172,7 @@ export function ProductionStartModal({ brief, onSuccess, onCancel }: Props) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

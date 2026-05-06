@@ -43,8 +43,16 @@ export function ImageBlock({ block, readOnly, blockRef, onUpdate, onFocus }: Pro
           <input
             type="url"
             defaultValue={url}
-            placeholder="https://..."
+            placeholder="https://… o pega una URL"
             autoFocus
+            onPaste={e => {
+              const text = e.clipboardData.getData('text')
+              if (text && (text.startsWith('http://') || text.startsWith('https://'))) {
+                e.preventDefault()
+                onUpdate({ url: text })
+                setEditing(false)
+              }
+            }}
             onBlur={e => {
               if (e.target.value) { onUpdate({ url: e.target.value }); setEditing(false) }
               else if (url) setEditing(false)

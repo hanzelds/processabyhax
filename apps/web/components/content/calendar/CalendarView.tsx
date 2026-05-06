@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { ContentPiece } from '@/types'
 import {
-  PIECE_STATUS_DOT, CONTENT_TYPE_ICON, PLATFORM_LABEL,
+  PIECE_STATUS_DOT, CONTENT_TYPE_ICON, CONTENT_TYPE_LABEL, PLATFORM_LABEL,
 } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { ChevronLeft, ChevronRight, Plus, AlertTriangle } from 'lucide-react'
@@ -13,7 +13,10 @@ import { PieceModal } from './PieceModal'
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function isoDate(d: Date) {
-  return d.toISOString().split('T')[0]
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 function calendarDays(year: number, month: number): Date[] {
@@ -51,11 +54,20 @@ function PieceChip({ piece, onClick }: { piece: ContentPiece; onClick: () => voi
   return (
     <div
       onClick={e => { e.stopPropagation(); onClick() }}
-      className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] cursor-pointer hover:opacity-80 transition-opacity border-l-2 bg-white border border-slate-100 ${borderColor}`}
+      className={`flex flex-col rounded px-1.5 py-1 cursor-pointer hover:opacity-80 transition-opacity border-l-2 bg-white border border-slate-100 ${borderColor}`}
     >
-      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${PIECE_STATUS_DOT[piece.status]}`} />
-      <span className="font-medium text-slate-700 truncate">{piece.title}</span>
-      {copyAlert && <AlertTriangle className="w-3 h-3 text-orange-400 shrink-0" />}
+      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide leading-none">
+        {CONTENT_TYPE_LABEL[piece.type]}
+      </span>
+      <span className="text-[11px] font-medium text-slate-700 truncate leading-snug">
+        {piece.title}
+        {copyAlert && <AlertTriangle className="w-3 h-3 text-orange-400 shrink-0 inline ml-1" />}
+      </span>
+      {piece.scheduledTime && (
+        <span className="text-[9px] text-slate-400 tabular-nums leading-none mt-0.5">
+          {piece.scheduledTime.slice(0, 5)}
+        </span>
+      )}
     </div>
   )
 }
@@ -92,7 +104,12 @@ function InboxItem({ piece, onClick }: {
     >
       <div className="flex items-start justify-between gap-2 mb-1">
         <p className="text-xs font-semibold text-slate-800 leading-snug line-clamp-2">{piece.title}</p>
-        <span className="text-base shrink-0">{CONTENT_TYPE_ICON[piece.type]}</span>
+        <span className="text-base shrink-0" title={CONTENT_TYPE_LABEL[piece.type]}>{CONTENT_TYPE_ICON[piece.type]}</span>
+      </div>
+      <div className="mb-1">
+        <span className="text-[10px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+          {CONTENT_TYPE_LABEL[piece.type]}
+        </span>
       </div>
       <div className="flex items-center gap-1.5 flex-wrap mb-1">
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${PIECE_STATUS_DOT[piece.status]}`} />

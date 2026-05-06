@@ -125,18 +125,24 @@ export function DocEditor({ page, readOnly = false, onTitleChange, onPageCreated
   const blockRefs = useRef<Map<string, HTMLElement>>(new Map())
   const toast = useToast()
 
-  // Autosave — debounce 1500ms
-  const saveBlocks = useMemo(() => debounce(async (current: DocBlock[]) => {
+  const [saveError, setSaveError] = useState(false)
+
+  const saveNow = useCallback(async (current: DocBlock[]) => {
     setSaving(true)
+    setSaveError(false)
     try {
       await api.put(`/api/docs/pages/${page.id}`, { content: current })
       setLastSaved(new Date())
     } catch (e) {
       console.error('Autosave failed', e)
+      setSaveError(true)
     } finally {
       setSaving(false)
     }
-  }, 1500), [page.id])
+  }, [page.id])
+
+  // Autosave — debounce 1500ms
+  const saveBlocks = useMemo(() => debounce(saveNow, 1500), [saveNow])
 
   const saveTitle = useMemo(() => debounce(async (t: string) => {
     try {
@@ -361,6 +367,18 @@ export function DocEditor({ page, readOnly = false, onTitleChange, onPageCreated
     window.print()
   }
 
+  // Cmd+S force save
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault()
+        if (!readOnly) saveNow(blocks)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [blocks, readOnly])
+
   // Relative time ticker
   const [, setTick] = useState(0)
   useEffect(() => {
@@ -375,8 +393,8 @@ export function DocEditor({ page, readOnly = false, onTitleChange, onPageCreated
       {/* Sticky top bar */}
       {!readOnly && (
         <div className="flex items-center justify-between px-6 py-2 border-b border-slate-100 bg-white/80 backdrop-blur-sm shrink-0 print:hidden">
-          <span className="text-xs text-slate-400">
-            {saving ? 'Guardando…' : lastSaved ? relativeTime(lastSaved) : 'Sin guardar aún'}
+          <span className={`text-xs ${saveError ? 'text-red-500 font-medium' : 'text-slate-400'}`}>
+            {saving ? 'Guardando…' : saveError ? '⚠ Error al guardar — Cmd+S para reintentar' : lastSaved ? relativeTime(lastSaved) : 'Sin guardar aún'}
           </span>
 
           <div className="flex items-center gap-2">
@@ -495,7 +513,7 @@ export function DocEditor({ page, readOnly = false, onTitleChange, onPageCreated
                 onFocus={setFocusedId}
                 onArrowUp={focusPrev}
                 onArrowDown={focusNext}
-                onSlash={(id, pos) => setBlockMenu({ blockId: id, filter: '', position: pos })}
+                onSlash={(id, pos, filter) => setBlockMenu({ blockId: id, filter, position: pos })}
                 onSlashClose={() => setBlockMenu(null)}
                 onMoveUp={id => moveBlock(id, -1)}
                 onMoveDown={id => moveBlock(id, 1)}

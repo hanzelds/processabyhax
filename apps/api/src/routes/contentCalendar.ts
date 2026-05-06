@@ -30,7 +30,7 @@ async function getAdminLeadEmails() {
 }
 
 // ── GET /calendar — monthly view ──────────────────────────────────────────────
-contentCalendarRouter.get('/calendar', isAdminOrLead, async (req, res) => {
+contentCalendarRouter.get('/calendar', isAuth, async (req, res) => {
   const year  = parseInt(req.query.year  as string) || new Date().getFullYear()
   const month = parseInt(req.query.month as string) || new Date().getMonth() + 1
   const { clientId } = req.query
@@ -53,7 +53,7 @@ contentCalendarRouter.get('/calendar', isAdminOrLead, async (req, res) => {
 })
 
 // ── GET /inbox — unscheduled pieces ───────────────────────────────────────────
-contentCalendarRouter.get('/inbox', isAdminOrLead, async (req, res) => {
+contentCalendarRouter.get('/inbox', isAuth, async (req, res) => {
   const { clientId } = req.query
   const where: Record<string, unknown> = {
     scheduledDate: null,
@@ -70,7 +70,7 @@ contentCalendarRouter.get('/inbox', isAdminOrLead, async (req, res) => {
 })
 
 // ── GET /pieces — list with filters ──────────────────────────────────────────
-contentCalendarRouter.get('/pieces', isAdminOrLead, async (req, res) => {
+contentCalendarRouter.get('/pieces', isAuth, async (req, res) => {
   const { clientId, status, type, copyStatus } = req.query
   const where: Record<string, unknown> = {}
   if (clientId)  where.clientId  = clientId as string
@@ -87,7 +87,7 @@ contentCalendarRouter.get('/pieces', isAdminOrLead, async (req, res) => {
 })
 
 // ── GET /pieces/:id ───────────────────────────────────────────────────────────
-contentCalendarRouter.get('/pieces/:id', isAdminOrLead, async (req, res) => {
+contentCalendarRouter.get('/pieces/:id', isAuth, async (req, res) => {
   const piece = await prisma.contentPiece.findUnique({
     where: { id: req.params.id },
     select: {
@@ -274,7 +274,7 @@ contentCalendarRouter.delete('/pieces/:id', isAdminOrLead, async (req, res) => {
 })
 
 // ── GET /pieces/:id/history ───────────────────────────────────────────────────
-contentCalendarRouter.get('/pieces/:id/history', isAdminOrLead, async (req, res) => {
+contentCalendarRouter.get('/pieces/:id/history', isAuth, async (req, res) => {
   const history = await prisma.contentPieceHistory.findMany({
     where: { pieceId: req.params.id },
     include: { actor: { select: { id: true, name: true } } },
