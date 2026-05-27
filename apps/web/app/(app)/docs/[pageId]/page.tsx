@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { cookies } from 'next/headers'
-import { DocPage, DocPageSummary } from '@/types'
+import { DocPage, DocPageSummary, User } from '@/types'
 import { DocPageClient } from './DocPageClient'
 
 async function fetchPage(pageId: string, cookieHeader: string): Promise<DocPage | null> {
@@ -17,6 +17,17 @@ async function fetchPage(pageId: string, cookieHeader: string): Promise<DocPage 
 async function fetchTree(contextType: string, contextId: string, cookieHeader: string): Promise<DocPageSummary[]> {
   try {
     const res = await fetch(`${process.env.API_INTERNAL_URL}/api/docs/${contextType}/${contextId}`, {
+      headers: { Cookie: cookieHeader },
+      cache: 'no-store',
+    })
+    if (!res.ok) return []
+    return res.json()
+  } catch { return [] }
+}
+
+async function fetchUsers(cookieHeader: string): Promise<User[]> {
+  try {
+    const res = await fetch(`${process.env.API_INTERNAL_URL}/api/users`, {
       headers: { Cookie: cookieHeader },
       cache: 'no-store',
     })
@@ -58,9 +69,10 @@ export default async function DocPageRoute({ params }: PageProps) {
   const cookieStore = await cookies()
   const cookieHeader = cookieStore.toString()
 
-  const [me, page] = await Promise.all([
+  const [me, page, users] = await Promise.all([
     fetchMe(cookieHeader),
     fetchPage(pageId, cookieHeader),
+    fetchUsers(cookieHeader),
   ])
 
   if (!me) redirect('/login')
@@ -76,6 +88,7 @@ export default async function DocPageRoute({ params }: PageProps) {
   return (
     <DocPageClient
       page={page}
+      users={users}
       tree={tree}
       contextName={context.name}
       contextEmoji={context.emoji}

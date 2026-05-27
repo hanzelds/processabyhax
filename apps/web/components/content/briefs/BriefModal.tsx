@@ -1,13 +1,14 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { ContentBrief, BriefStatus, BriefRole, Client, User, ContentType, ContentPlatform, BriefCommentItem } from '@/types'
 import {
   BRIEF_STATUS_LABEL, BRIEF_STATUS_COLOR, ALL_BRIEF_STATUSES,
   CONTENT_TYPE_OPTIONS, PLATFORM_OPTIONS, BRIEF_ROLE_LABEL,
 } from '@/lib/utils'
 import { api } from '@/lib/api'
-import { X, Plus, Trash2, ChevronDown, ChevronUp, Paperclip, Upload, FileText, Image, Film, Music, Archive, ExternalLink, Download, MessageSquare } from 'lucide-react'
+import { X, Plus, Trash2, ChevronDown, ChevronUp, Paperclip, Upload, FileText, Image, Film, Music, Archive, ExternalLink, Download, MessageSquare, ScrollText } from 'lucide-react'
+import Link from 'next/link'
 import { useConfirm } from '@/components/ui/ConfirmDialog'
 import { BriefComments } from './comments/BriefComments'
 import { StatusNoteModal } from './comments/StatusNoteModal'
@@ -48,11 +49,12 @@ const INPUT = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus
 const LABEL = 'text-xs font-semibold text-slate-500 mb-1 block uppercase tracking-wide'
 
 const SCRIPT_HINT: Record<ContentType, string> = {
-  reel:     'INTRO (0-3s): Hook\nDESARROLLO (3-45s): Puntos clave\nCTA (últimos 3s): Acción',
-  carrusel: 'SLIDE 1: Portada — título\nSLIDE 2-N: Un punto por slide\nSLIDE FINAL: CTA + contacto',
-  post:     'Imagen / visual principal\nCopy de acompañamiento\nCTA',
-  story:    'Visual principal\nTexto / sticker\nEnlace o CTA',
-  video:    'INTRO: Hook\nDESARROLLO: Contenido\nCTA: Cierre',
+  reel:               'INTRO (0-3s): Hook\nDESARROLLO (3-45s): Puntos clave\nCTA (últimos 3s): Acción',
+  carrusel:           'SLIDE 1: Portada — título\nSLIDE 2-N: Un punto por slide\nSLIDE FINAL: CTA + contacto',
+  post:               'Imagen / visual principal\nCopy de acompañamiento\nCTA',
+  story:              'Visual principal\nTexto / sticker\nEnlace o CTA',
+  video:              'INTRO: Hook\nDESARROLLO: Contenido\nCTA: Cierre',
+  real_estate_media:  'TOMAS AÉREAS: Vista general de la propiedad\nEXTERIORES: Fachada, jardín, piscina\nINTERIORES: Sala, cocina, habitaciones\nDETALLES: Acabados y amenidades\nCTA: Contacto y precio',
 }
 
 interface Props {
@@ -150,8 +152,57 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
   // No longer locked — admins can edit/delete any brief including entregado/cancelado
   const isLocked = false
 
+  // ── Autosave (edit mode only, not new) ───────────────────────────────────────
+  const [autoSaveState, setAutoSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const autoSaveTimer = useRef<NodeJS.Timeout | null>(null)
+
+  const autoSave = useCallback(async (fields: {
+    title: string; type: ContentType; platforms: ContentPlatform[]
+    concept: string; script: string; copyDraft: string; hashtags: string
+    technicalNotes: string; clientApprovalNotes: string
+    isRecurring: boolean; recurrenceFreq: string; referencesUrls: string[]
+  }) => {
+    if (!brief || !fields.title.trim() || !fields.platforms.length) return
+    setAutoSaveState('saving')
+    try {
+      const updated = await api.patch<ContentBrief>(`/api/briefs/${brief.id}`, {
+        title: fields.title, type: fields.type, platforms: fields.platforms,
+        concept: fields.concept, script: fields.script, copyDraft: fields.copyDraft,
+        hashtags: fields.hashtags, technicalNotes: fields.technicalNotes,
+        clientApprovalNotes: fields.clientApprovalNotes, isRecurring: fields.isRecurring,
+        recurrenceFreq: fields.recurrenceFreq || null, referencesUrls: fields.referencesUrls,
+      })
+      onUpdate(updated)
+      setAutoSaveState('saved')
+    } catch {
+      setAutoSaveState('error')
+    }
+  }, [brief, onUpdate])
+
+  function scheduleAutoSave(overrides: Partial<Parameters<typeof autoSave>[0]> = {}) {
+    if (isNew || !editing) return
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
+    autoSaveTimer.current = setTimeout(() => {
+      autoSave({
+        title, type, platforms, concept, script, copyDraft, hashtags,
+        technicalNotes, clientApprovalNotes, isRecurring, recurrenceFreq, referencesUrls,
+        ...overrides,
+      })
+    }, 1500)
+    setAutoSaveState('idle')
+  }
+
+  // Reset autosave indicator after 3s
+  useEffect(() => {
+    if (autoSaveState !== 'saved') return
+    const t = setTimeout(() => setAutoSaveState('idle'), 3000)
+    return () => clearTimeout(t)
+  }, [autoSaveState])
+
   function togglePlatform(p: ContentPlatform) {
-    setPlatforms(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p])
+    const next = platforms.includes(p) ? platforms.filter(x => x !== p) : [...platforms, p]
+    setPlatforms(next)
+    scheduleAutoSave({ platforms: next })
   }
 
   async function handleSave() {
@@ -229,26 +280,47 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
   }
 
   function addRef() {
-    if (newRef.trim()) { setReferencesUrls(prev => [...prev, newRef.trim()]); setNewRef('') }
+    if (!newRef.trim()) return
+    const next = [...referencesUrls, newRef.trim()]
+    setReferencesUrls(next)
+    setNewRef('')
+    scheduleAutoSave({ referencesUrls: next })
+  }
+
+  function removeRef(i: number) {
+    const next = referencesUrls.filter((_, j) => j !== i)
+    setReferencesUrls(next)
+    scheduleAutoSave({ referencesUrls: next })
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
       <div
         className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <div className="flex items-center gap-2">
-            <h2 className="font-semibold text-slate-900">{isNew ? 'Nuevo brief' : (editing ? 'Editar brief' : brief?.title)}</h2>
+          <div className="flex items-center gap-2 min-w-0">
+            <h2 className="font-semibold text-slate-900 truncate">{isNew ? 'Nuevo brief' : (editing ? 'Editar brief' : brief?.title)}</h2>
             {!isNew && !editing && (
-              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${BRIEF_STATUS_COLOR[status]}`}>
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${BRIEF_STATUS_COLOR[status]}`}>
                 {BRIEF_STATUS_LABEL[status]}
               </span>
             )}
+            {!isNew && editing && (
+              <span className={`text-[10px] font-medium shrink-0 ${
+                autoSaveState === 'saving' ? 'text-slate-400' :
+                autoSaveState === 'saved'  ? 'text-emerald-500' :
+                autoSaveState === 'error'  ? 'text-red-400' : 'text-slate-300'
+              }`}>
+                {autoSaveState === 'saving' ? 'Guardando…' :
+                 autoSaveState === 'saved'  ? '✓ Guardado' :
+                 autoSaveState === 'error'  ? '⚠ Error al guardar' : ''}
+              </span>
+            )}
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 shrink-0"><X className="w-5 h-5" /></button>
         </div>
 
         {/* Tabs (detail mode) */}
@@ -286,10 +358,10 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
           {/* ── FORM (new or editing) ── */}
           {(isNew || editing) && (
             <>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="col-span-2">
                   <label className={LABEL}>Título *</label>
-                  <input className={INPUT} value={title} onChange={e => setTitle(e.target.value)} placeholder="Ej: Reel tips de inversión — semana 3" />
+                  <input className={INPUT} value={title} onChange={e => { setTitle(e.target.value); scheduleAutoSave({ title: e.target.value }) }} placeholder="Ej: Reel tips de inversión — semana 3" />
                 </div>
                 {isNew && (
                   <div className="col-span-2">
@@ -302,7 +374,7 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
                 )}
                 <div>
                   <label className={LABEL}>Tipo *</label>
-                  <select className={INPUT} value={type} onChange={e => setType(e.target.value as ContentType)}>
+                  <select className={INPUT} value={type} onChange={e => { setType(e.target.value as ContentType); scheduleAutoSave({ type: e.target.value as ContentType }) }}>
                     {CONTENT_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                 </div>
@@ -336,7 +408,7 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
 
               <div>
                 <label className={LABEL}>Concepto</label>
-                <textarea className={`${INPUT} resize-none`} rows={2} value={concept} onChange={e => setConcept(e.target.value)} placeholder="Idea central en 1-3 líneas" />
+                <textarea className={`${INPUT} resize-none`} rows={2} value={concept} onChange={e => { setConcept(e.target.value); scheduleAutoSave({ concept: e.target.value }) }} placeholder="Idea central en 1-3 líneas" />
               </div>
 
               <div>
@@ -348,26 +420,26 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
                     className={`${INPUT} resize-none font-mono text-xs`}
                     rows={6}
                     value={script}
-                    onChange={e => setScript(e.target.value)}
+                    onChange={e => { setScript(e.target.value); scheduleAutoSave({ script: e.target.value }) }}
                     placeholder={SCRIPT_HINT[type]}
                   />
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className={LABEL}>Copy / caption borrador</label>
-                  <textarea className={`${INPUT} resize-none`} rows={3} value={copyDraft} onChange={e => setCopyDraft(e.target.value)} />
+                  <textarea className={`${INPUT} resize-none`} rows={3} value={copyDraft} onChange={e => { setCopyDraft(e.target.value); scheduleAutoSave({ copyDraft: e.target.value }) }} />
                 </div>
                 <div>
                   <label className={LABEL}>Hashtags</label>
-                  <textarea className={`${INPUT} resize-none`} rows={3} value={hashtags} onChange={e => setHashtags(e.target.value)} placeholder="#hax #contenido" />
+                  <textarea className={`${INPUT} resize-none`} rows={3} value={hashtags} onChange={e => { setHashtags(e.target.value); scheduleAutoSave({ hashtags: e.target.value }) }} placeholder="#hax #contenido" />
                 </div>
               </div>
 
               <div>
                 <label className={LABEL}>Indicaciones técnicas</label>
-                <textarea className={`${INPUT} resize-none`} rows={2} value={technicalNotes} onChange={e => setTechnicalNotes(e.target.value)} placeholder="Duración, formato, ratio, música sugerida…" />
+                <textarea className={`${INPUT} resize-none`} rows={2} value={technicalNotes} onChange={e => { setTechnicalNotes(e.target.value); scheduleAutoSave({ technicalNotes: e.target.value }) }} placeholder="Duración, formato, ratio, música sugerida…" />
               </div>
 
               <div>
@@ -376,7 +448,7 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
                   {referencesUrls.map((url, i) => (
                     <div key={i} className="flex items-center gap-2">
                       <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline truncate flex-1">{url}</a>
-                      <button onClick={() => setReferencesUrls(prev => prev.filter((_, j) => j !== i))} className="text-slate-300 hover:text-red-400"><X className="w-3 h-3" /></button>
+                      <button onClick={() => removeRef(i)} className="text-slate-300 hover:text-red-400"><X className="w-3 h-3" /></button>
                     </div>
                   ))}
                 </div>
@@ -389,15 +461,15 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
               {!isNew && (
                 <div>
                   <label className={LABEL}>Notas de aprobación del cliente</label>
-                  <textarea className={`${INPUT} resize-none`} rows={2} value={clientApprovalNotes} onChange={e => setClientApprovalNotes(e.target.value)} />
+                  <textarea className={`${INPUT} resize-none`} rows={2} value={clientApprovalNotes} onChange={e => { setClientApprovalNotes(e.target.value); scheduleAutoSave({ clientApprovalNotes: e.target.value }) }} />
                 </div>
               )}
 
               <div className="flex items-center gap-3 pt-1">
-                <input type="checkbox" id="recurring" checked={isRecurring} onChange={e => setIsRecurring(e.target.checked)} className="rounded" />
+                <input type="checkbox" id="recurring" checked={isRecurring} onChange={e => { setIsRecurring(e.target.checked); scheduleAutoSave({ isRecurring: e.target.checked }) }} className="rounded" />
                 <label htmlFor="recurring" className="text-sm text-slate-600">Es formato recurrente</label>
                 {isRecurring && (
-                  <select className="border border-slate-200 rounded-lg px-2 py-1 text-sm" value={recurrenceFreq} onChange={e => setRecurrenceFreq(e.target.value)}>
+                  <select className="border border-slate-200 rounded-lg px-2 py-1 text-sm" value={recurrenceFreq} onChange={e => { setRecurrenceFreq(e.target.value); scheduleAutoSave({ recurrenceFreq: e.target.value }) }}>
                     <option value="">Frecuencia</option>
                     <option value="semanal">Semanal</option>
                     <option value="quincenal">Quincenal</option>
@@ -417,7 +489,7 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
                   <p className="text-sm text-slate-700 leading-relaxed">{brief.concept}</p>
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-4 text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                 <div><p className={LABEL}>Tipo</p><p className="text-slate-700">{brief?.type}</p></div>
                 <div><p className={LABEL}>Plataformas</p><p className="text-slate-700">{brief?.platforms.join(', ')}</p></div>
                 {brief?.technicalNotes && <div className="col-span-2"><p className={LABEL}>Indicaciones técnicas</p><p className="text-slate-700">{brief.technicalNotes}</p></div>}
@@ -462,6 +534,47 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
                   <p className="text-xs text-slate-400 mt-0.5 capitalize">{briefData.project.status.toLowerCase()}</p>
                 </div>
               )}
+
+              {/* Scripts (Guiones) */}
+              <div className="border border-slate-100 rounded-xl p-3 bg-slate-50/60">
+                <div className="flex items-center justify-between mb-2">
+                  <p className={LABEL + ' mb-0'}>Guiones</p>
+                  {isAdmin && (
+                    <Link
+                      href={`/content/scripts?briefId=${briefData?.id}`}
+                      target="_blank"
+                      className="text-[10px] font-semibold text-[#17394f] hover:underline flex items-center gap-0.5"
+                      onClick={onClose}
+                    >
+                      Ver todos <ExternalLink className="w-2.5 h-2.5" />
+                    </Link>
+                  )}
+                </div>
+                {briefData?.scripts && briefData.scripts.length > 0 ? (
+                  <div className="space-y-1.5">
+                    {briefData.scripts.map(s => (
+                      <Link
+                        key={s.id}
+                        href={`/content/scripts/${s.id}`}
+                        onClick={onClose}
+                        className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white border border-slate-200 hover:border-[#17394f]/40 hover:shadow-sm transition-all group"
+                      >
+                        <ScrollText className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                        <span className="flex-1 text-sm text-slate-800 font-medium truncate group-hover:text-[#17394f]">{s.title}</span>
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ${
+                          s.status === 'aprobado' ? 'bg-emerald-100 text-emerald-700' :
+                          s.status === 'en_revision' ? 'bg-amber-100 text-amber-700' :
+                          s.status === 'archivado' ? 'bg-slate-100 text-slate-400' :
+                          'bg-slate-100 text-slate-500'
+                        }`}>{s.status === 'borrador' ? 'Borrador' : s.status === 'en_revision' ? 'En revisión' : s.status === 'aprobado' ? 'Aprobado' : 'Archivado'}</span>
+                        <ExternalLink className="w-3 h-3 text-slate-300 group-hover:text-[#17394f] shrink-0" />
+                      </Link>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400 py-1">Sin guiones asignados</p>
+                )}
+              </div>
 
               {/* Production tasks */}
               {briefData?.productionTasks && briefData.productionTasks.length > 0 && (
@@ -678,9 +791,9 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
               Cancelar brief
             </button>
           )}
-          {(isNew || editing) && (
+          {isNew && (
             <div className="flex gap-2 ml-auto">
-              <button onClick={() => isNew ? onClose() : setEditing(false)} className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
+              <button onClick={onClose} className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
                 Cancelar
               </button>
               <button
@@ -688,9 +801,14 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
                 disabled={saving || !title.trim() || !clientId || !platforms.length}
                 className="px-4 py-2 text-sm bg-[#17394f] text-white rounded-lg font-medium disabled:opacity-50 hover:bg-[#17394f]/90"
               >
-                {saving ? 'Guardando…' : isNew ? 'Crear brief' : 'Guardar cambios'}
+                {saving ? 'Guardando…' : 'Crear brief'}
               </button>
             </div>
+          )}
+          {!isNew && editing && (
+            <button onClick={() => setEditing(false)} className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 ml-auto">
+              Cerrar editor
+            </button>
           )}
           {!isNew && !editing && (
             <button onClick={onClose} className="px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 ml-auto">

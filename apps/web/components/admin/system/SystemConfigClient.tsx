@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { SystemSettings, PermissionRow, SystemStats } from '@/types'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -8,12 +8,13 @@ import {
   Settings, Mail, MessageCircle, Shield, BarChart3,
   Building2, Lock, Users, FolderKanban, FileText,
   CheckCircle, AlertCircle, Loader2, Check, X, Info,
-  CheckSquare, Clapperboard, Wrench, Zap,
+  CheckSquare, Clapperboard, Wrench, Zap, Briefcase, Trash2, Plus, ChevronUp, ChevronDown,
 } from 'lucide-react'
+import { Service } from '@/types'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
-type Tab = 'general' | 'seguridad' | 'usuarios' | 'proyectos' | 'tareas' | 'contenido' | 'email' | 'whatsapp' | 'sistema'
+type Tab = 'general' | 'seguridad' | 'usuarios' | 'proyectos' | 'tareas' | 'contenido' | 'email' | 'whatsapp' | 'sistema' | 'servicios'
 
 const TABS: { id: Tab; label: string; Icon: typeof Settings }[] = [
   { id: 'general',    label: 'General',     Icon: Settings      },
@@ -22,6 +23,7 @@ const TABS: { id: Tab; label: string; Icon: typeof Settings }[] = [
   { id: 'proyectos',  label: 'Proyectos',   Icon: FolderKanban  },
   { id: 'tareas',     label: 'Tareas',      Icon: CheckSquare   },
   { id: 'contenido',  label: 'Contenido',   Icon: Clapperboard  },
+  { id: 'servicios',  label: 'Servicios',   Icon: Briefcase     },
   { id: 'email',      label: 'Email',       Icon: Mail          },
   { id: 'whatsapp',   label: 'WhatsApp',    Icon: MessageCircle },
   { id: 'sistema',    label: 'Sistema',     Icon: BarChart3     },
@@ -207,7 +209,7 @@ function SeguridadTab({ settings, onSave }: { settings: SystemSettings; onSave: 
   return (
     <div className="space-y-4">
       <Section title="Sesiones" description="Control de acceso y duración de sesiones">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Duración de sesión (días)" hint="Cuántos días permanece activa una sesión sin relogin">
             <input type="number" min="1" max="365" className={INPUT} value={sessionDays} onChange={e => setSessionDays(e.target.value)} />
           </Field>
@@ -400,7 +402,7 @@ function TareasTab({ settings, onSave }: { settings: SystemSettings; onSave: (u:
   return (
     <div className="space-y-4">
       <Section title="Valores por defecto">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Días plazo por defecto" hint="Días hasta vencimiento al crear tarea sin fecha explícita">
             <input type="number" min="1" max="365" className={INPUT} value={dueDays} onChange={e => setDueDays(e.target.value)} />
           </Field>
@@ -478,7 +480,7 @@ function ContenidoTab({ settings, onSave }: { settings: SystemSettings; onSave: 
   return (
     <div className="space-y-4">
       <Section title="Recordatorios de publicación" description="Cuándo se envían alertas automáticas sobre piezas de contenido">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Días antes para recordatorio de publicación" hint="Alerta enviada N días antes de la fecha programada">
             <input type="number" min="1" max="30" className={INPUT} value={reminderDays} onChange={e => setReminderDays(e.target.value)} />
           </Field>
@@ -760,7 +762,7 @@ function SistemaTab({ stats, permissions }: { stats: SystemStats | null; permiss
 
       {activeSection === 'stats' && stats && (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <StatCard icon={Users}       label="Usuarios"    value={stats.users.total}   sub={`Admin: ${stats.users.byRole.ADMIN ?? 0} · Lead: ${stats.users.byRole.LEAD ?? 0} · Team: ${stats.users.byRole.TEAM ?? 0}`} color="bg-[#17394f]/10 text-[#17394f]" />
             <StatCard icon={Building2}   label="Clientes"    value={stats.clients.total} sub={`${stats.clients.active} activos`}   color="bg-blue-50 text-blue-600" />
             <StatCard icon={FolderKanban}label="Proyectos"   value={stats.projects.total}sub={`${stats.projects.active} en curso`}  color="bg-purple-50 text-purple-600" />
@@ -784,7 +786,7 @@ function SistemaTab({ stats, permissions }: { stats: SystemStats | null; permiss
             )}
           </Section>
           <Section title="Distribución del equipo">
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {(['ADMIN', 'LEAD', 'TEAM'] as const).map(role => {
                 const count = stats.users.byRole[role] ?? 0
                 const pct   = stats.users.total > 0 ? Math.round((count / stats.users.total) * 100) : 0
@@ -861,6 +863,183 @@ function SistemaTab({ stats, permissions }: { stats: SystemStats | null; permiss
   )
 }
 
+// ── Servicios Tab ─────────────────────────────────────────────────────────────
+
+function ServiciosTab() {
+  const [services, setServices] = useState<Service[]>([])
+  const [loading, setLoading]   = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [name, setName]         = useState('')
+  const [icon, setIcon]         = useState('')
+  const [color, setColor]       = useState('#17394f')
+  const [saving, setSaving]     = useState(false)
+  const [error, setError]       = useState('')
+
+  async function load() {
+    setLoading(true)
+    try {
+      const data = await api.get<Service[]>('/api/services')
+      setServices(data)
+    } catch { /* ignore */ }
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [])
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault()
+    if (!name.trim()) { setError('El nombre es requerido'); return }
+    setSaving(true)
+    setError('')
+    try {
+      const created = await api.post<Service>('/api/services', {
+        name: name.trim(),
+        icon: icon || null,
+        color: color || null,
+        order: services.length,
+      })
+      setServices(prev => [...prev, created])
+      setName(''); setIcon(''); setColor('#17394f')
+      setShowForm(false)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Error al crear')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (!confirm('¿Eliminar este servicio del catálogo?')) return
+    try {
+      await api.delete(`/api/services/${id}`)
+      setServices(prev => prev.filter(s => s.id !== id))
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : 'Error al eliminar')
+    }
+  }
+
+  async function handleReorder(id: string, dir: 'up' | 'down') {
+    const idx = services.findIndex(s => s.id === id)
+    if (dir === 'up' && idx === 0) return
+    if (dir === 'down' && idx === services.length - 1) return
+    const next = [...services]
+    const swap = dir === 'up' ? idx - 1 : idx + 1
+    ;[next[idx], next[swap]] = [next[swap], next[idx]]
+    setServices(next)
+    // Persist new order for both
+    await Promise.all([
+      api.patch(`/api/services/${next[idx].id}`,  { order: idx }),
+      api.patch(`/api/services/${next[swap].id}`, { order: swap }),
+    ]).catch(() => {})
+  }
+
+  return (
+    <div className="space-y-4">
+      <Section title="Catálogo de Servicios" description="Define los tipos de servicios que ofrece Hax a sus clientes.">
+        {loading ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {services.length === 0 && !showForm && (
+              <p className="text-sm text-slate-400 py-4 text-center">No hay servicios en el catálogo.</p>
+            )}
+            {services.map((s, idx) => (
+              <div key={s.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                <div
+                  className="w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0"
+                  style={{ backgroundColor: s.color ? `${s.color}25` : '#f1f5f9', color: s.color || '#64748b' }}
+                >
+                  {s.icon || <Briefcase className="w-4 h-4" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-800">{s.name}</p>
+                  {s.color && <p className="text-xs text-slate-400">{s.color}</p>}
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => handleReorder(s.id, 'up')} disabled={idx === 0}
+                    className="p-1 rounded hover:bg-slate-200 text-slate-400 disabled:opacity-30">
+                    <ChevronUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={() => handleReorder(s.id, 'down')} disabled={idx === services.length - 1}
+                    className="p-1 rounded hover:bg-slate-200 text-slate-400 disabled:opacity-30">
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={() => handleDelete(s.id)}
+                    className="p-1 rounded hover:bg-red-50 text-slate-400 hover:text-red-500">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {showForm ? (
+              <form onSubmit={handleCreate} className="p-3 border border-brand-200 rounded-xl bg-white space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Nombre *</label>
+                    <input
+                      value={name}
+                      onChange={e => setName(e.target.value)}
+                      placeholder="Ej. Social Media"
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-700/30"
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">Ícono (emoji)</label>
+                    <input
+                      value={icon}
+                      onChange={e => setIcon(e.target.value)}
+                      placeholder="📱"
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-700/30"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Color</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={color}
+                      onChange={e => setColor(e.target.value)}
+                      className="w-8 h-8 rounded cursor-pointer border-0"
+                    />
+                    <input
+                      value={color}
+                      onChange={e => setColor(e.target.value)}
+                      className="w-32 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-700/30"
+                    />
+                  </div>
+                </div>
+                {error && <p className="text-xs text-red-600">{error}</p>}
+                <div className="flex gap-2">
+                  <button type="submit" disabled={saving}
+                    className="px-3 py-1.5 text-sm bg-brand-700 text-white rounded-lg font-medium hover:bg-brand-800 disabled:opacity-50">
+                    {saving ? 'Guardando...' : 'Crear'}
+                  </button>
+                  <button type="button" onClick={() => { setShowForm(false); setError('') }}
+                    className="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <button
+                onClick={() => setShowForm(true)}
+                className="flex items-center gap-2 w-full px-3 py-2.5 text-sm text-slate-500 hover:text-brand-700 hover:bg-brand-50 rounded-xl border border-dashed border-slate-200 hover:border-brand-300 transition-colors"
+              >
+                <Plus className="w-4 h-4" /> Nuevo servicio
+              </button>
+            )}
+          </div>
+        )}
+      </Section>
+    </div>
+  )
+}
+
 // ── Root ──────────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -910,6 +1089,7 @@ export function SystemConfigClient({ initialSettings, permissions, stats }: Prop
       {activeTab === 'email'     && <EmailTab      settings={settings} onSave={handleSave} />}
       {activeTab === 'whatsapp'  && <WhatsAppTab   settings={settings} onSave={handleSave} />}
       {activeTab === 'sistema'   && <SistemaTab    stats={stats} permissions={permissions} />}
+      {activeTab === 'servicios' && <ServiciosTab />}
     </div>
   )
 }

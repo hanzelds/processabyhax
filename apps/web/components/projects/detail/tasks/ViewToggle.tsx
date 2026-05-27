@@ -16,11 +16,12 @@ interface Props {
   onChange: (v: ViewMode) => void
   noDateCount: number
   onNoDateClick: () => void
+  hideMb?: boolean
 }
 
-export function ViewToggle({ view, onChange, noDateCount, onNoDateClick }: Props) {
+export function ViewToggle({ view, onChange, noDateCount, onNoDateClick, hideMb }: Props) {
   return (
-    <div className="flex items-center justify-between mb-5">
+    <div className={`flex items-center gap-3 ${hideMb ? '' : 'mb-5'}`}>
       {/* View buttons */}
       <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl">
         {VIEWS.map(({ id, label, Icon }) => (

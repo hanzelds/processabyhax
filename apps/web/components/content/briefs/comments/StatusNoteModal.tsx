@@ -43,7 +43,7 @@ export function StatusNoteModal({ briefId, newStatus, teamUsers, onConfirm, onCa
   const label = STATUS_LABEL[newStatus] ?? newStatus
 
   return (
-    <div className="fixed inset-0 z-[9995] flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
+    <div className="fixed inset-0 z-[9995] flex items-center justify-center bg-black/40 p-4">
       <div
         className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 flex flex-col gap-5"
         onClick={e => e.stopPropagation()}

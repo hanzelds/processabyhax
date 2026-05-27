@@ -18,6 +18,7 @@ export type PortalPiece = {
   scheduledTime: string | null
   briefId: string | null
   coverImageFileId: string | null
+  scripts: PortalScript[]
   portalApproval: PortalApproval | null
 }
 
@@ -28,6 +29,22 @@ export type PortalBriefFile = {
   sizeBytes: number
   label: string | null
   createdAt: string
+}
+
+export type PortalReelScene = {
+  id: string; order: number; duration: string
+  visual: string; audio: string; textOverlay: string; music: string
+}
+export type PortalCarouselSlide = {
+  id: string; order: number
+  headline: string; body: string; imageDesc: string; cta: string
+}
+export type PortalScript = {
+  id: string
+  title: string
+  status: string
+  type: string
+  content: PortalReelScene[] | PortalCarouselSlide[]
 }
 
 export type PortalBrief = {
@@ -43,6 +60,7 @@ export type PortalBrief = {
   referencesUrls: string[]
   technicalNotes: string | null
   files: PortalBriefFile[]
+  scripts: PortalScript[]
   portalApproval: PortalApproval | null
 }
 

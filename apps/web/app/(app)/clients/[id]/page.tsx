@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers'
 import { getServerUser } from '@/lib/auth'
 import { notFound, redirect } from 'next/navigation'
-import { Client, ClientContact, ClientMetrics, ClientNote, ClientHistoryEntry, DocPageSummary } from '@/types'
+import { Client, ClientContact, ClientMetrics, ClientNote, ClientHistoryEntry, DocPageSummary, ClientService } from '@/types'
 import { ClientDetailClient } from '@/components/clients/detail/ClientDetailClient'
 
 const API = process.env.API_INTERNAL_URL || 'http://localhost:4100'
@@ -25,13 +25,14 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const cookieStore = await cookies()
   const token = cookieStore.get('token')?.value || ''
 
-  const [client, contacts, metrics, notesFeed, historyData, docsTree] = await Promise.all([
+  const [client, contacts, metrics, notesFeed, historyData, docsTree, clientServices] = await Promise.all([
     apiFetch<Client>(`/api/clients/${id}`, token),
     apiFetch<ClientContact[]>(`/api/clients/${id}/contacts`, token),
     apiFetch<ClientMetrics>(`/api/clients/${id}/metrics`, token),
     apiFetch<NotesFeedData>(`/api/clients/${id}/notes`, token),
     apiFetch<HistoryData>(`/api/clients/${id}/history`, token),
     apiFetch<DocPageSummary[]>(`/api/docs/client/${id}`, token),
+    apiFetch<ClientService[]>(`/api/clients/${id}/services`, token),
   ])
 
   if (!client) notFound()
@@ -49,7 +50,9 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       historyData={historyData ?? defaultHistory}
       currentUserId={user?.id ?? ''}
       isAdmin={user?.role === 'ADMIN'}
+      userRole={user?.role ?? 'TEAM'}
       initialDocs={docsTree ?? []}
+      clientServices={clientServices ?? []}
     />
   )
 }

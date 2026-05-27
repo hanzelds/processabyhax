@@ -101,6 +101,60 @@ dashboardRouter.get('/admin/projects-progress', isAdmin, async (req, res) => {
   res.json(result)
 })
 
+dashboardRouter.get('/admin/overview', isAdmin, async (_req, res) => {
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7)
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1)
+  const in7days = new Date(today); in7days.setDate(today.getDate() + 7)
+
+  const [
+    completedThisWeek,
+    completedThisMonth,
+    activeClients,
+    briefRows,
+    upcomingTasks,
+  ] = await Promise.all([
+    prisma.task.count({ where: { status: 'COMPLETED', completedAt: { gte: weekAgo } } }),
+    prisma.task.count({ where: { status: 'COMPLETED', completedAt: { gte: monthStart } } }),
+    prisma.client.count({ where: { status: 'ACTIVE' } }),
+    // Briefs by status (excluding terminal states)
+    prisma.contentBrief.groupBy({
+      by: ['status'],
+      where: { status: { notIn: ['entregado', 'cancelado'] } },
+      _count: { id: true },
+    }),
+    // Tasks due in next 7 days (not completed)
+    prisma.task.findMany({
+      where: {
+        status: { notIn: ['COMPLETED'] },
+        dueDate: { gte: today, lte: in7days },
+      },
+      include: {
+        assignees: { include: { user: { select: { id: true, name: true } } } },
+        project: { select: { id: true, name: true, client: { select: { name: true } } } },
+      },
+      orderBy: { dueDate: 'asc' },
+      take: 15,
+    }),
+  ])
+
+  const briefsByStatus = briefRows.map(r => ({ status: r.status, count: r._count.id }))
+
+  const deadlines = upcomingTasks.map(t => ({
+    taskId:     t.id,
+    title:      t.title,
+    dueDate:    t.dueDate,
+    daysLeft:   t.dueDate ? Math.ceil((t.dueDate.getTime() - today.getTime()) / 86400000) : null,
+    projectId:  t.project.id,
+    projectName: t.project.name,
+    clientName: t.project.client.name,
+    assignees:  t.assignees.map(a => ({ id: a.user.id, name: a.user.name })),
+    status:     t.status,
+  }))
+
+  res.json({ completedThisWeek, completedThisMonth, activeClients, briefsByStatus, deadlines })
+})
+
 dashboardRouter.get('/admin/activity', isAdmin, async (req, res) => {
   const { limit = '20', offset = '0', event_type, user_id, from, to } = req.query
 

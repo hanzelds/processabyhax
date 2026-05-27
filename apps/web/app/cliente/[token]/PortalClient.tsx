@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { PortalData, PortalPiece, PortalBrief, PortalBriefFile } from './types'
+import { PortalData, PortalPiece, PortalBrief, PortalBriefFile, PortalScript, PortalReelScene, PortalCarouselSlide } from './types'
 
 const API_PATH = '/api'
 
@@ -102,12 +102,154 @@ function ChangesForm({ onSubmit, onCancel, saving }: {
   )
 }
 
+// ── Script viewer ─────────────────────────────────────────────────────────────
+
+const SCRIPT_STATUS_LABEL: Record<string, string> = {
+  borrador: 'Borrador', en_revision: 'En revisión', aprobado: 'Aprobado', archivado: 'Archivado',
+}
+const SCRIPT_STATUS_COLOR: Record<string, string> = {
+  borrador: 'bg-slate-100 text-slate-500',
+  en_revision: 'bg-amber-100 text-amber-700',
+  aprobado: 'bg-emerald-100 text-emerald-700',
+  archivado: 'bg-slate-100 text-slate-400',
+}
+
+function ReelScriptTable({ scenes }: { scenes: PortalReelScene[] }) {
+  if (!scenes.length) return null
+  return (
+    <div className="overflow-x-auto rounded-xl border border-slate-100">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="bg-slate-50 text-left text-[10px] font-bold text-slate-400 uppercase tracking-wide">
+            <th className="px-3 py-2 w-8">#</th>
+            <th className="px-3 py-2 w-12">Dur.</th>
+            <th className="px-3 py-2">Visual</th>
+            <th className="px-3 py-2">Audio / Voz</th>
+            <th className="px-3 py-2">Texto en pantalla</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-50">
+          {scenes.map((s, i) => (
+            <tr key={s.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
+              <td className="px-3 py-2.5 font-bold text-slate-400">{i + 1}</td>
+              <td className="px-3 py-2.5 text-slate-500 font-medium tabular-nums whitespace-nowrap">{s.duration || '—'}</td>
+              <td className="px-3 py-2.5 text-slate-700 leading-snug">{s.visual || '—'}</td>
+              <td className="px-3 py-2.5 text-slate-700 leading-snug">{s.audio || '—'}</td>
+              <td className="px-3 py-2.5 text-slate-700 leading-snug">{s.textOverlay || '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function CarouselScriptSlides({ slides }: { slides: PortalCarouselSlide[] }) {
+  const [active, setActive] = useState(0)
+  if (!slides.length) return null
+  const slide = slides[active]
+  return (
+    <div className="space-y-2">
+      {/* Slide tabs */}
+      <div className="flex gap-1 overflow-x-auto pb-1">
+        {slides.map((s, i) => (
+          <button
+            key={s.id}
+            onClick={() => setActive(i)}
+            className={`shrink-0 text-[10px] font-bold px-2.5 py-1 rounded-full border transition-colors ${
+              active === i ? 'bg-[#17394f] text-white border-[#17394f]' : 'border-slate-200 text-slate-500 hover:border-slate-300'
+            }`}
+          >
+            Slide {i + 1}
+          </button>
+        ))}
+      </div>
+      {/* Slide content */}
+      <div className="bg-slate-50 rounded-xl p-3 space-y-2">
+        {slide.headline && (
+          <div>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Titular</p>
+            <p className="text-sm font-semibold text-slate-800">{slide.headline}</p>
+          </div>
+        )}
+        {slide.body && (
+          <div>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Cuerpo</p>
+            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{slide.body}</p>
+          </div>
+        )}
+        {slide.imageDesc && (
+          <div>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Descripción visual</p>
+            <p className="text-sm text-slate-500 italic">{slide.imageDesc}</p>
+          </div>
+        )}
+        {slide.cta && (
+          <div>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">CTA</p>
+            <p className="text-sm font-semibold text-[#17394f]">{slide.cta}</p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ScriptViewer({ scripts }: { scripts: PortalScript[] }) {
+  const [openId, setOpenId] = useState<string | null>(scripts.length === 1 ? scripts[0].id : null)
+  if (!scripts.length) return null
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">📝 Guion{scripts.length > 1 ? 'es' : ''}</p>
+      {scripts.map(s => {
+        const isOpen = openId === s.id
+        const isReel = s.type === 'reel'
+        const scenes = isReel ? (s.content as PortalReelScene[]) : []
+        const slides = !isReel ? (s.content as PortalCarouselSlide[]) : []
+        const hasContent = (isReel ? scenes : slides).some(r =>
+          isReel
+            ? ((r as PortalReelScene).visual || (r as PortalReelScene).audio || (r as PortalReelScene).textOverlay)
+            : ((r as PortalCarouselSlide).headline || (r as PortalCarouselSlide).body)
+        )
+        return (
+          <div key={s.id} className="border border-slate-200 rounded-xl overflow-hidden">
+            <button
+              onClick={() => setOpenId(isOpen ? null : s.id)}
+              className="w-full flex items-center justify-between gap-2 px-3 py-2.5 bg-white hover:bg-slate-50 transition-colors"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-sm font-semibold text-slate-800 truncate">{s.title}</span>
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${SCRIPT_STATUS_COLOR[s.status] ?? 'bg-slate-100 text-slate-500'}`}>
+                  {SCRIPT_STATUS_LABEL[s.status] ?? s.status}
+                </span>
+              </div>
+              <span className="text-slate-400 text-sm shrink-0">{isOpen ? '▲' : '▼'}</span>
+            </button>
+            {isOpen && (
+              <div className="px-3 pb-3 pt-1 bg-white border-t border-slate-100">
+                {!hasContent ? (
+                  <p className="text-xs text-slate-400 py-2 text-center">El guion está vacío</p>
+                ) : isReel ? (
+                  <ReelScriptTable scenes={scenes.filter(sc => sc.visual || sc.audio || sc.textOverlay)} />
+                ) : (
+                  <CarouselScriptSlides slides={slides} />
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── Review card (piece or brief) ──────────────────────────────────────────────
 
 function ReviewCard({
   id, title, type, platforms, scheduledDate, scheduledTime,
   copy, hashtags, notes, refsUrls, script, concept, technicalNotes, files,
-  briefId, approval, priorFeedback,
+  briefId, scripts, approval, priorFeedback,
   onApprove, onChanges,
 }: {
   id: string
@@ -125,6 +267,7 @@ function ReviewCard({
   technicalNotes?: string | null
   files?: PortalBriefFile[]
   briefId?: string
+  scripts?: PortalScript[]
   approval: 'pending' | 'approved' | 'changes'
   priorFeedback?: string | null
   onApprove: () => void
@@ -151,8 +294,17 @@ function ReviewCard({
       approval === 'changes' ? 'border-amber-200 bg-amber-50/30' :
       'border-slate-200 bg-white shadow-sm'
     }`}>
+      {/* Story format badge */}
+      {type === 'story' && (
+        <div className="flex items-center gap-1.5 px-4 pt-3 pb-0">
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 border border-yellow-200">
+            📱 Formato Story · Vertical 9:16
+          </span>
+        </div>
+      )}
+
       {/* Card header */}
-      <div className="px-4 pt-4 pb-3">
+      <div className="px-4 pt-3 pb-3">
         <div className="flex items-start gap-3">
           <span className="text-2xl mt-0.5 shrink-0">{TYPE_ICON[type] ?? '📄'}</span>
           <div className="flex-1 min-w-0">
@@ -188,6 +340,9 @@ function ReviewCard({
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Guión</p>
             <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap bg-slate-50 rounded-xl p-3">{script}</p>
           </div>
+        )}
+        {scripts && scripts.length > 0 && (
+          <ScriptViewer scripts={scripts} />
         )}
         {copy && (
           <div>
@@ -267,6 +422,19 @@ function ReviewCard({
   )
 }
 
+// ── Section divider ───────────────────────────────────────────────────────────
+
+function SectionDivider({ icon, label, count }: { icon: string; label: string; count: number }) {
+  return (
+    <div className="flex items-center gap-2 py-1">
+      <span className="text-base">{icon}</span>
+      <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">{label}</span>
+      <span className="text-[10px] font-semibold text-slate-300 bg-slate-100 px-1.5 py-0.5 rounded-full">{count}</span>
+      <div className="flex-1 h-px bg-slate-100" />
+    </div>
+  )
+}
+
 // ── Feed preview ─────────────────────────────────────────────────────────────
 
 const TYPE_BG: Record<string, string> = {
@@ -310,7 +478,7 @@ function FeedCell({ piece, onClick }: { piece: PortalPiece; onClick: () => void 
   return (
     <button
       onClick={onClick}
-      className="relative aspect-square w-full overflow-hidden rounded-lg"
+      className="relative w-full overflow-hidden rounded-lg" style={{ aspectRatio: '3/4' }}
     >
       {imgUrl ? (
         <img src={imgUrl} alt={piece.title} className="absolute inset-0 w-full h-full object-cover" />
@@ -621,24 +789,47 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
               </div>
             ) : (
               <>
-                {pending.map(p => (
-                  <ReviewCard
-                    key={p.id}
-                    id={p.id}
-                    title={p.title}
-                    type={p.type}
-                    platforms={p.platforms}
-                    scheduledDate={p.scheduledDate}
-                    scheduledTime={p.scheduledTime}
-                    copy={p.copy}
-                    hashtags={p.hashtags}
-                    notes={p.publicationNotes}
-                    refsUrls={p.referencesUrls}
-                    approval="pending"
-                    onApprove={() => approvePiece(p.id)}
-                    onChanges={fb => changesPiece(p.id, fb)}
-                  />
-                ))}
+                {/* Posts (carrusel / post / reel / video) */}
+                {(() => {
+                  const posts = pending.filter(p => p.type !== 'story')
+                  const stories = pending.filter(p => p.type === 'story')
+                  return (
+                    <>
+                      {posts.length > 0 && (
+                        <>
+                          {stories.length > 0 && <SectionDivider icon="🎬" label="Posts & Reels" count={posts.length} />}
+                          {posts.map(p => (
+                            <ReviewCard
+                              key={p.id} id={p.id} title={p.title} type={p.type}
+                              platforms={p.platforms} scheduledDate={p.scheduledDate}
+                              scheduledTime={p.scheduledTime} copy={p.copy}
+                              hashtags={p.hashtags} notes={p.publicationNotes}
+                              refsUrls={p.referencesUrls} scripts={p.scripts} approval="pending"
+                              onApprove={() => approvePiece(p.id)}
+                              onChanges={fb => changesPiece(p.id, fb)}
+                            />
+                          ))}
+                        </>
+                      )}
+                      {stories.length > 0 && (
+                        <>
+                          <SectionDivider icon="📱" label="Stories" count={stories.length} />
+                          {stories.map(p => (
+                            <ReviewCard
+                              key={p.id} id={p.id} title={p.title} type={p.type}
+                              platforms={p.platforms} scheduledDate={p.scheduledDate}
+                              scheduledTime={p.scheduledTime} copy={p.copy}
+                              hashtags={p.hashtags} notes={p.publicationNotes}
+                              refsUrls={p.referencesUrls} scripts={p.scripts} approval="pending"
+                              onApprove={() => approvePiece(p.id)}
+                              onChanges={fb => changesPiece(p.id, fb)}
+                            />
+                          ))}
+                        </>
+                      )}
+                    </>
+                  )
+                })()}
                 {briefsPending.map(b => (
                   <ReviewCard
                     key={b.id}
@@ -648,6 +839,7 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
                     platforms={b.platforms}
                     concept={b.concept}
                     script={b.script}
+                    scripts={b.scripts}
                     copy={b.copyDraft}
                     hashtags={b.hashtags}
                     technicalNotes={b.technicalNotes}
@@ -686,25 +878,48 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
                 <p className="text-sm text-slate-400 mt-1">Ve a la pestaña Pendiente para revisar.</p>
               </div>
             ) : (
-              approved.map(p => (
-                <ReviewCard
-                  key={p.id}
-                  id={p.id}
-                  title={p.title}
-                  type={p.type}
-                  platforms={p.platforms}
-                  scheduledDate={p.scheduledDate}
-                  scheduledTime={p.scheduledTime}
-                  copy={p.copy}
-                  hashtags={p.hashtags}
-                  notes={p.publicationNotes}
-                  refsUrls={p.referencesUrls}
-                  approval={approvalOf(p)}
-                  priorFeedback={p.portalApproval?.feedback}
-                  onApprove={() => approvePiece(p.id)}
-                  onChanges={fb => changesPiece(p.id, fb)}
-                />
-              ))
+              (() => {
+                const posts   = approved.filter(p => p.type !== 'story')
+                const stories = approved.filter(p => p.type === 'story')
+                return (
+                  <>
+                    {posts.length > 0 && (
+                      <>
+                        {stories.length > 0 && <SectionDivider icon="🎬" label="Posts & Reels" count={posts.length} />}
+                        {posts.map(p => (
+                          <ReviewCard
+                            key={p.id} id={p.id} title={p.title} type={p.type}
+                            platforms={p.platforms} scheduledDate={p.scheduledDate}
+                            scheduledTime={p.scheduledTime} copy={p.copy}
+                            hashtags={p.hashtags} notes={p.publicationNotes}
+                            refsUrls={p.referencesUrls} scripts={p.scripts} approval={approvalOf(p)}
+                            priorFeedback={p.portalApproval?.feedback}
+                            onApprove={() => approvePiece(p.id)}
+                            onChanges={fb => changesPiece(p.id, fb)}
+                          />
+                        ))}
+                      </>
+                    )}
+                    {stories.length > 0 && (
+                      <>
+                        <SectionDivider icon="📱" label="Stories" count={stories.length} />
+                        {stories.map(p => (
+                          <ReviewCard
+                            key={p.id} id={p.id} title={p.title} type={p.type}
+                            platforms={p.platforms} scheduledDate={p.scheduledDate}
+                            scheduledTime={p.scheduledTime} copy={p.copy}
+                            hashtags={p.hashtags} notes={p.publicationNotes}
+                            refsUrls={p.referencesUrls} scripts={p.scripts} approval={approvalOf(p)}
+                            priorFeedback={p.portalApproval?.feedback}
+                            onApprove={() => approvePiece(p.id)}
+                            onChanges={fb => changesPiece(p.id, fb)}
+                          />
+                        ))}
+                      </>
+                    )}
+                  </>
+                )
+              })()
             )}
           </>
         )}
@@ -735,6 +950,7 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
                   platforms={b.platforms}
                   concept={b.concept}
                   script={b.script}
+                  scripts={b.scripts}
                   copy={b.copyDraft}
                   hashtags={b.hashtags}
                   technicalNotes={b.technicalNotes}

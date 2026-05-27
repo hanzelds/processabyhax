@@ -12,6 +12,9 @@ interface NavItem {
 }
 
 function getItems(role: string): NavItem[] {
+  if (role === 'PARTNER') {
+    return [{ href: '/clients', label: 'Clientes', icon: Building2 }]
+  }
   return [
     { href: '/dashboard',   label: 'Tareas',    icon: CheckSquare  },
     { href: '/projects',    label: 'Proyectos', icon: FolderKanban },

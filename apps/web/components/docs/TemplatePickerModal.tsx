@@ -54,7 +54,7 @@ export function TemplatePickerModal({ contextType, contextId, onClose, onCreated
   }
 
   return (
-    <div className="fixed inset-0 z-[9990] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[9990] flex items-center justify-center bg-black/40 p-4">
       <div
         className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[70vh]"
         onClick={e => e.stopPropagation()}

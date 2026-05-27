@@ -59,6 +59,9 @@ export function ScriptEditorClient({ me, initialScript, users }: Props) {
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [sidePanel, setSidePanel] = useState<SidePanel | null>('brief')
   const [showStatusMenu, setShowStatusMenu] = useState(false)
+  const [showMoreMenu, setShowMoreMenu] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const moreMenuRef = useRef<HTMLDivElement>(null)
 
   const dirty = useRef(false)
 
@@ -100,6 +103,28 @@ export function ScriptEditorClient({ me, initialScript, users }: Props) {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [content, title, saveNow])
+
+  useEffect(() => {
+    function onMouseDown(e: MouseEvent) {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setShowMoreMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    return () => document.removeEventListener('mousedown', onMouseDown)
+  }, [])
+
+  async function deleteScript() {
+    if (!confirm(`¿Eliminar "${script.title}"? Esta acción no se puede deshacer.`)) return
+    setDeleting(true)
+    try {
+      await api.delete(`/api/scripts/${script.id}`)
+      router.push('/content/scripts')
+    } catch {
+      alert('Error al eliminar el guion')
+      setDeleting(false)
+    }
+  }
 
   async function changeStatus(next: ScriptStatus) {
     setShowStatusMenu(false)
@@ -164,6 +189,30 @@ export function ScriptEditorClient({ me, initialScript, users }: Props) {
             : lastSaved ? `Guardado ${lastSaved.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}`
             : null}
         </div>
+
+        {/* More actions (admin) */}
+        {isAdmin && (
+          <div className="relative" ref={moreMenuRef}>
+            <button
+              onClick={() => setShowMoreMenu(s => !s)}
+              disabled={deleting}
+              className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+              title="Más opciones"
+            >
+              <MoreHorizontal className="w-4 h-4" />
+            </button>
+            {showMoreMenu && (
+              <div className="absolute right-0 top-8 bg-white border border-slate-200 rounded-xl shadow-lg py-1 z-30 min-w-[160px]">
+                <button
+                  onClick={() => { setShowMoreMenu(false); deleteScript() }}
+                  className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                >
+                  Eliminar guion
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Side panel toggles */}
         <div className="flex items-center gap-0.5 border border-slate-200 rounded-lg p-0.5">

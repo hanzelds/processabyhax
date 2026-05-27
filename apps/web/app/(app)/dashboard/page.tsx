@@ -1,10 +1,12 @@
 import { getServerUser } from '@/lib/auth'
 import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
 import { AdminDashboard } from '@/components/dashboard/AdminDashboard'
 import { TeamDashboard } from '@/components/dashboard/TeamDashboard'
 import { LeadDashboard } from '@/components/dashboard/LeadDashboard'
 import {
   AdminKPIs,
+  AdminOverview,
   WorkloadEntry,
   ProjectProgress,
   ActivityFeedResponse,
@@ -47,11 +49,13 @@ export default async function DashboardPage() {
   const token = cookieStore.get('token')?.value || ''
 
   if (!user) return null
+  if (user.role === 'PARTNER') redirect('/clients')
 
   // ── ADMIN ──────────────────────────────────────────────────────────────────
   if (user.role === 'ADMIN') {
-    const [kpis, workload, progress, activity, myTasksData, adminAlerts] = await Promise.all([
+    const [kpis, overview, workload, progress, activity, myTasksData, adminAlerts] = await Promise.all([
       apiFetch<AdminKPIs>('/api/dashboard/admin/kpis', token),
+      apiFetch<AdminOverview>('/api/dashboard/admin/overview', token),
       apiFetch<WorkloadEntry[]>('/api/dashboard/admin/workload', token),
       apiFetch<ProjectProgress[]>('/api/dashboard/admin/projects-progress', token),
       apiFetch<ActivityFeedResponse>('/api/dashboard/admin/activity?limit=20', token),
@@ -59,9 +63,12 @@ export default async function DashboardPage() {
       apiFetch<AdminTaskAlerts>('/api/admin/tasks/alerts', token),
     ])
 
+    const emptyOverview: AdminOverview = { completedThisWeek: 0, completedThisMonth: 0, activeClients: 0, briefsByStatus: [], deadlines: [] }
+
     return (
       <AdminDashboard
         kpis={kpis ?? { activeProjects: 0, tasksInProgress: 0, tasksOverdue: 0, tasksBlocked: 0 }}
+        overview={overview ?? emptyOverview}
         workload={workload ?? []}
         progress={progress ?? []}
         activity={activity ?? { entries: [], hasMore: false, total: 0 }}

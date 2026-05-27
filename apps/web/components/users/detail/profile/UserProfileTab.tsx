@@ -210,6 +210,7 @@ export function UserProfileTab({ user: initialUser, skills: initialSkills, isAdm
                       <option value="ADMIN">Admin</option>
                       <option value="LEAD">Lead</option>
                       <option value="TEAM">Team</option>
+                      <option value="PARTNER">Socio comercial</option>
                     </select>
                   ) : (
                     <p className="text-sm text-slate-600">{USER_ROLE_LABEL[user.role]}</p>

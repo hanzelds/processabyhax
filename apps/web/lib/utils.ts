@@ -69,15 +69,17 @@ export const CLIENT_TIER_COLOR: Record<ClientTier, string> = {
 }
 
 export const USER_ROLE_LABEL: Record<Role, string> = {
-  ADMIN: 'Admin',
-  LEAD:  'Lead',
-  TEAM:  'Team',
+  ADMIN:   'Admin',
+  LEAD:    'Lead',
+  TEAM:    'Team',
+  PARTNER: 'Socio comercial',
 }
 
 export const USER_ROLE_COLOR: Record<Role, string> = {
-  ADMIN: 'bg-purple-100 text-purple-700',
-  LEAD:  'bg-brand-100 text-brand-700',
-  TEAM:  'bg-slate-100 text-slate-600',
+  ADMIN:   'bg-purple-100 text-purple-700',
+  LEAD:    'bg-brand-100 text-brand-700',
+  TEAM:    'bg-slate-100 text-slate-600',
+  PARTNER: 'bg-amber-100 text-amber-700',
 }
 
 export const USER_STATUS_LABEL: Record<UserStatus, string> = {
@@ -220,19 +222,21 @@ export const COPY_STATUS_COLOR: Record<CopyStatus, string> = {
 }
 
 export const CONTENT_TYPE_LABEL: Record<ContentType, string> = {
-  reel:     'Reel',
-  carrusel: 'Carrusel',
-  post:     'Post',
-  story:    'Story',
-  video:    'Video',
+  reel:              'Reel',
+  carrusel:          'Carrusel',
+  post:              'Post',
+  story:             'Story',
+  video:             'Video',
+  real_estate_media: 'Real Estate Media',
 }
 
 export const CONTENT_TYPE_ICON: Record<ContentType, string> = {
-  reel:     '🎬',
-  carrusel: '🖼️',
-  post:     '📸',
-  story:    '⭕',
-  video:    '📹',
+  reel:              '🎬',
+  carrusel:          '🖼️',
+  post:              '📸',
+  story:             '⭕',
+  video:             '📹',
+  real_estate_media: '🏠',
 }
 
 export const PLATFORM_LABEL: Record<ContentPlatform, string> = {
@@ -259,11 +263,12 @@ export const BRIEF_ROLE_LABEL: Record<BriefRole, string> = {
 }
 
 export const CONTENT_TYPE_OPTIONS: { value: ContentType; label: string }[] = [
-  { value: 'reel',     label: 'Reel' },
-  { value: 'carrusel', label: 'Carrusel' },
-  { value: 'post',     label: 'Post' },
-  { value: 'story',    label: 'Story' },
-  { value: 'video',    label: 'Video' },
+  { value: 'reel',               label: 'Reel' },
+  { value: 'carrusel',           label: 'Carrusel' },
+  { value: 'post',               label: 'Post' },
+  { value: 'story',              label: 'Story' },
+  { value: 'video',              label: 'Video' },
+  { value: 'real_estate_media',  label: 'Real Estate Media' },
 ]
 
 export const PLATFORM_OPTIONS: { value: ContentPlatform; label: string }[] = [

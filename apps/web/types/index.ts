@@ -1,7 +1,7 @@
-export type Role = 'ADMIN' | 'LEAD' | 'TEAM'
+export type Role = 'ADMIN' | 'LEAD' | 'TEAM' | 'PARTNER'
 
 // ── Content modules ───────────────────────────────────────────────────────────
-export type ContentType = 'reel' | 'carrusel' | 'post' | 'story' | 'video'
+export type ContentType = 'reel' | 'carrusel' | 'post' | 'story' | 'video' | 'real_estate_media'
 export type ContentPlatform = 'instagram' | 'tiktok' | 'facebook' | 'linkedin' | 'youtube'
 export type BriefStatus =
   | 'idea' | 'en_desarrollo' | 'revision_interna' | 'aprobacion_cliente'
@@ -64,6 +64,8 @@ export interface ContentBrief {
   assignees: BriefAssignee[]
   productionTasks?: BriefProductionTask[]
   history?: BriefHistoryEntry[]
+  _count?: { scripts: number }
+  scripts?: Array<{ id: string; title: string; status: string }>
 }
 
 export interface ContentPiece {
@@ -194,6 +196,8 @@ export interface Client {
   description?: string | null
   relationStart?: string | null
   color?: string | null
+  socialMedia?: boolean
+  commercialPartner?: boolean
   createdAt: string
   _count?: { projects: number }
   projects?: Project[]
@@ -267,6 +271,8 @@ export interface Project {
   name: string
   clientId: string
   client?: Pick<Client, 'id' | 'name' | 'status'>
+  clientServiceId?: string | null
+  clientService?: { id: string; name?: string | null; service: { id: string; name: string; icon?: string | null; color?: string | null } } | null
   description?: string | null
   status: ProjectStatus
   startDate: string
@@ -353,9 +359,10 @@ export interface Task {
   id: string
   title: string
   description?: string | null
-  projectId: string
-  project?: Pick<Project, 'id' | 'name'> & { client?: Pick<Client, 'id' | 'name'> }
+  projectId?: string | null
+  project?: (Pick<Project, 'id' | 'name'> & { client?: Pick<Client, 'id' | 'name' | 'color'> }) | null
   briefId?: string | null
+  brief?: { id: string; title: string; scripts?: Array<{ id: string; title: string; status: string }> } | null
   assignees: TaskAssignee[]
   status: TaskStatus
   taskType?: TaskType | null
@@ -482,6 +489,7 @@ export interface DocPage {
   templateDesc?: string | null
   approvedById?: string | null
   approvedAt?: string | null
+  fullWidth?: boolean
   isFavorite?: boolean
   createdBy: { id: string; name: string }
   updatedBy?: { id: string; name: string } | null
@@ -565,6 +573,7 @@ export type ScriptStatus = 'borrador' | 'en_revision' | 'aprobado' | 'archivado'
 export interface ReelScene {
   id: string
   order: number
+  sceneType?: string
   duration: string
   visual: string
   audio: string
@@ -632,4 +641,179 @@ export interface SystemStats {
   tasks: { total: number; completed: number; overdue: number }
   content: { briefs: number; pieces: number }
   adminTasks: number
+}
+
+export interface AppNotification {
+  id: string
+  type: string
+  title: string
+  body: string
+  link?: string | null
+  readAt?: string | null
+  createdAt: string
+}
+
+export interface TimeEntry {
+  id: string
+  taskId?: string | null
+  projectId?: string | null
+  task?: { id: string; title: string; project?: { name: string } | null } | null
+  project?: { id: string; name: string; client: { name: string } } | null
+  description?: string | null
+  minutes: number
+  date: string
+  startedAt?: string | null
+  createdAt: string
+}
+
+export interface ActiveTimer extends TimeEntry {
+  minutesElapsed: number
+}
+
+// ── Logística ──────────────────────────────────────────────────────────────────
+
+export interface GearItem {
+  id: string
+  name: string
+  category: string
+  brand?: string | null
+  model?: string | null
+  serialNumber?: string | null
+  status: string
+  notes?: string | null
+  imageUrl?: string | null
+  createdAt: string
+  _count?: { shootGear: number }
+}
+
+export interface LocationItem {
+  id: string
+  name: string
+  address?: string | null
+  contactName?: string | null
+  contactPhone?: string | null
+  contactEmail?: string | null
+  costPerDay?: number | null
+  notes?: string | null
+  photoUrls: string[]
+  isActive: boolean
+  createdAt: string
+  _count?: { shoots: number }
+  shoots?: { id: string; title: string; status: string; shootDate: string }[]
+}
+
+export interface VehicleItem {
+  id: string
+  name: string
+  plate: string
+  type: string
+  brand?: string | null
+  model?: string | null
+  year?: number | null
+  color?: string | null
+  status: string
+  notes?: string | null
+  imageUrl?: string | null
+  createdAt: string
+}
+
+export interface ShootCrewMember {
+  id: string
+  userId: string
+  role: string
+  callTime?: string | null
+  user: { id: string; name: string; avatarUrl?: string | null; area?: string | null }
+}
+
+export interface ShootGearItem {
+  id: string
+  gearItemId: string
+  notes?: string | null
+  gearItem: GearItem
+}
+
+export interface ShootVehicleItem {
+  id: string
+  vehicleId: string
+  driverName?: string | null
+  notes?: string | null
+  vehicle: VehicleItem
+}
+
+export interface Shoot {
+  id: string
+  title: string
+  status: string
+  shootDate: string
+  endDate?: string | null
+  locationId?: string | null
+  location?: { id: string; name: string; address?: string | null; contactName?: string | null; contactPhone?: string | null; costPerDay?: number | null } | null
+  projectId?: string | null
+  project?: { id: string; name: string } | null
+  clientId?: string | null
+  client?: { id: string; name: string } | null
+  briefId?: string | null
+  brief?: { id: string; title: string } | null
+  notes?: string | null
+  createdAt: string
+  createdBy?: { id: string; name: string }
+  crew: ShootCrewMember[]
+  gear: ShootGearItem[]
+  vehicles: ShootVehicleItem[]
+  _count?: { crew: number; gear: number; vehicles: number }
+}
+
+
+// ── Servicios por cliente ─────────────────────────────────────────────────────
+
+export interface Service {
+  id: string
+  name: string
+  icon?: string | null
+  color?: string | null
+  order: number
+  createdAt: string
+}
+
+export type ClientServiceStatus = 'ACTIVE' | 'PAUSED' | 'COMPLETED' | 'CANCELLED'
+
+export interface ClientService {
+  id: string
+  clientId: string
+  serviceId: string
+  service: Service
+  name?: string | null
+  status: ClientServiceStatus
+  startDate?: string | null
+  endDate?: string | null
+  notes?: string | null
+  createdAt: string
+  _count?: { projects: number }
+}
+
+
+// ── Mi Día — Planificador diario ──────────────────────────────────────────────
+
+export interface WorkBlock {
+  id: string
+  userId: string
+  date: string
+  startTime: string
+  endTime: string
+  title?: string | null
+  notes?: string | null
+  color?: string | null
+  taskId?: string | null
+  shootId?: string | null
+  contentPieceId?: string | null
+  briefId?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface DayPlanData {
+  tasks:         Task[]
+  shoots:        Shoot[]
+  contentPieces: ContentPiece[]
+  workBlocks:    WorkBlock[]
 }

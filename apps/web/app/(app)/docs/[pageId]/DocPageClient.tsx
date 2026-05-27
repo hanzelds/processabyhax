@@ -2,20 +2,21 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { DocPage, DocPageSummary } from '@/types'
+import { DocPage, DocPageSummary, User } from '@/types'
 import { DocEditor } from '@/components/docs/DocEditor'
 import { DocSidebar } from '@/components/docs/DocSidebar'
 import { ChevronRight } from 'lucide-react'
 
 interface Props {
   page: DocPage
+  users: User[]
   tree: DocPageSummary[]
   contextName: string
   contextEmoji?: string
   isAdmin: boolean
 }
 
-export function DocPageClient({ page, tree, contextName, contextEmoji, isAdmin }: Props) {
+export function DocPageClient({ page, users, tree, contextName, contextEmoji, isAdmin }: Props) {
   const [pageTitle, setPageTitle] = useState(page.title)
 
   // Build breadcrumb from tree
@@ -73,6 +74,7 @@ export function DocPageClient({ page, tree, contextName, contextEmoji, isAdmin }
         {/* Editor */}
         <DocEditor
           page={page}
+          users={users}
           readOnly={false}
           onTitleChange={setPageTitle}
         />

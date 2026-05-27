@@ -1,8 +1,9 @@
 import { Router } from 'express'
 import { prisma } from '../lib/prisma'
-import { isAuth, isAdminOrLead } from '../middleware/auth'
+import { isAuth, isAdminOrLead, requirePermission } from '../middleware/auth'
 import { BriefStatus, BriefRole, ContentType } from '@prisma/client'
 import { sendBriefAssignedEmail, sendBriefStatusEmail } from '../lib/email'
+import { createNotification, createNotifications } from '../lib/notify'
 
 export const briefsRouter = Router()
 
@@ -26,6 +27,8 @@ const BRIEF_SELECT = {
     },
     orderBy: { createdAt: 'asc' as const },
   },
+  _count: { select: { scripts: true } },
+  scripts: { select: { id: true, title: true, status: true }, orderBy: { createdAt: 'asc' as const } },
 }
 
 async function logBriefHistory(briefId: string, actorId: string, eventType: string, description: string, meta?: object) {
@@ -75,8 +78,51 @@ briefsRouter.get('/:id', isAuth, async (req, res) => {
   res.json(brief)
 })
 
+// ── POST /bulk — create multiple briefs at once ───────────────────────────────
+briefsRouter.post('/bulk', requirePermission('content.write'), async (req, res) => {
+  const { clientId, briefs } = req.body
+  if (!clientId) { res.status(400).json({ error: 'clientId es requerido' }); return }
+  if (!Array.isArray(briefs) || briefs.length === 0) {
+    res.status(400).json({ error: 'Se requiere al menos un brief' }); return
+  }
+
+  // Validate each row
+  for (const [i, b] of briefs.entries()) {
+    if (!b.title?.trim())       { res.status(400).json({ error: `Fila ${i + 1}: título requerido` }); return }
+    if (!b.type)                { res.status(400).json({ error: `Fila ${i + 1}: tipo requerido` }); return }
+    if (!b.platforms?.length)   { res.status(400).json({ error: `Fila ${i + 1}: al menos una plataforma requerida` }); return }
+  }
+
+  const created = await prisma.$transaction(
+    briefs.map((b: any) =>
+      prisma.contentBrief.create({
+        data: {
+          title:       b.title.trim(),
+          clientId,
+          type:        b.type as ContentType,
+          platforms:   b.platforms as string[],
+          status:      (b.status as BriefStatus) || 'idea',
+          isRecurring: false,
+          referencesUrls: [],
+          createdById: req.user!.userId,
+        },
+        select: BRIEF_SELECT,
+      })
+    )
+  )
+
+  // Log history for each
+  await Promise.all(
+    created.map(b =>
+      logBriefHistory(b.id, req.user!.userId, 'brief_created', `Brief "${b.title}" creado (creación en masa)`)
+    )
+  )
+
+  res.status(201).json(created)
+})
+
 // ── POST / — create brief ─────────────────────────────────────────────────────
-briefsRouter.post('/', isAdminOrLead, async (req, res) => {
+briefsRouter.post('/', requirePermission('content.write'), async (req, res) => {
   const { title, clientId, type, platforms, concept, script, referencesUrls,
           copyDraft, hashtags, technicalNotes, isRecurring, recurrenceFreq } = req.body
 
@@ -104,7 +150,7 @@ briefsRouter.post('/', isAdminOrLead, async (req, res) => {
 })
 
 // ── PATCH /:id — edit brief ───────────────────────────────────────────────────
-briefsRouter.patch('/:id', isAdminOrLead, async (req, res) => {
+briefsRouter.patch('/:id', requirePermission('content.write'), async (req, res) => {
   const { title, concept, script, referencesUrls, copyDraft, hashtags,
           technicalNotes, clientApprovalNotes, isRecurring, recurrenceFreq, type, platforms } = req.body
 
@@ -136,7 +182,7 @@ briefsRouter.patch('/:id', isAdminOrLead, async (req, res) => {
 })
 
 // ── PATCH /:id/status ─────────────────────────────────────────────────────────
-briefsRouter.patch('/:id/status', isAdminOrLead, async (req, res) => {
+briefsRouter.patch('/:id/status', requirePermission('content.write'), async (req, res) => {
   const { status } = req.body
   if (!status) { res.status(400).json({ error: 'Status requerido' }); return }
 
@@ -207,11 +253,41 @@ briefsRouter.patch('/:id/status', isAdminOrLead, async (req, res) => {
   sendBriefStatusEmail({ brief, status, actor: req.user!.name ?? 'Un admin' })
     .catch(console.error)
 
+  // In-app notifications by status
+  const actorName = req.user!.name ?? 'Un admin'
+  const actorId = req.user!.userId
+  if (status === 'revision_interna' || status === 'entregado') {
+    prisma.user.findMany({ where: { role: { in: ['ADMIN', 'LEAD'] }, status: 'ACTIVE' }, select: { id: true } })
+      .then(users => createNotifications(users.filter(u => u.id !== actorId).map(u => ({
+        userId: u.id, type: 'brief_status_changed',
+        title: status === 'revision_interna' ? 'Brief listo para revisión' : 'Brief entregado',
+        body:  `${actorName}: "${brief.title}" está en ${status === 'revision_interna' ? 'revisión interna' : 'entregado'}`,
+        link:  '/content/briefs',
+      })))).catch(console.error)
+  } else if (status === 'aprobacion_cliente') {
+    prisma.user.findMany({ where: { role: 'ADMIN', status: 'ACTIVE' }, select: { id: true } })
+      .then(users => createNotifications(users.filter(u => u.id !== actorId).map(u => ({
+        userId: u.id, type: 'brief_status_changed',
+        title: 'Brief listo para aprobación del cliente',
+        body:  `${actorName}: "${brief.title}" está en aprobación del cliente`,
+        link:  '/content/briefs',
+      })))).catch(console.error)
+  } else if (status === 'aprobado') {
+    createNotifications(prev.assignees
+      .filter(a => a.user.status === 'ACTIVE' && a.userId !== actorId)
+      .map(a => ({
+        userId: a.userId, type: 'brief_status_changed',
+        title: 'Brief aprobado',
+        body:  `"${brief.title}" fue aprobado`,
+        link:  '/content/briefs',
+      }))).catch(console.error)
+  }
+
   res.json(brief)
 })
 
 // ── POST /:id/assignees ───────────────────────────────────────────────────────
-briefsRouter.post('/:id/assignees', isAdminOrLead, async (req, res) => {
+briefsRouter.post('/:id/assignees', requirePermission('content.write'), async (req, res) => {
   const { userId, role } = req.body
   if (!userId || !role) { res.status(400).json({ error: 'userId y role son requeridos' }); return }
 
@@ -229,20 +305,31 @@ briefsRouter.post('/:id/assignees', isAdminOrLead, async (req, res) => {
   await logBriefHistory(req.params.id, req.user!.userId, 'assignee_added',
     `${user.name} asignado como ${role}`, { userId, role })
 
-  if (user.status === 'ACTIVE') sendBriefAssignedEmail({
-    to: user.email,
-    recipientName: user.name,
-    assignerName: req.user!.name ?? 'Un admin',
-    briefTitle: brief.title,
-    role,
-    clientName: brief.client.name,
-  }).catch(console.error)
+  if (user.status === 'ACTIVE') {
+    sendBriefAssignedEmail({
+      to: user.email,
+      recipientName: user.name,
+      assignerName: req.user!.name ?? 'Un admin',
+      briefTitle: brief.title,
+      role,
+      clientName: brief.client.name,
+    }).catch(console.error)
+    if (userId !== req.user!.userId) {
+      createNotification({
+        userId,
+        type:  'brief_assigned',
+        title: `Brief asignado: ${brief.title}`,
+        body:  `${req.user!.name ?? 'Un admin'} te asignó un brief de ${brief.client.name}`,
+        link:  '/content/briefs',
+      }).catch(console.error)
+    }
+  }
 
   res.status(201).json(assignee)
 })
 
 // ── DELETE /:id/assignees/:userId/:role ───────────────────────────────────────
-briefsRouter.delete('/:id/assignees/:userId/:role', isAdminOrLead, async (req, res) => {
+briefsRouter.delete('/:id/assignees/:userId/:role', requirePermission('content.write'), async (req, res) => {
   const { id, userId, role } = req.params
   await prisma.briefAssignee.deleteMany({ where: { briefId: id, userId, role: role as BriefRole } })
   await logBriefHistory(id, req.user!.userId, 'assignee_removed',
@@ -261,7 +348,7 @@ briefsRouter.get('/:id/history', isAuth, async (req, res) => {
 })
 
 // ── PATCH /:id/project — link/unlink a project ───────────────────────────────
-briefsRouter.patch('/:id/project', isAdminOrLead, async (req, res) => {
+briefsRouter.patch('/:id/project', requirePermission('content.write'), async (req, res) => {
   const { projectId } = req.body
   const brief = await prisma.contentBrief.update({
     where: { id: req.params.id },
@@ -274,7 +361,7 @@ briefsRouter.patch('/:id/project', isAdminOrLead, async (req, res) => {
 })
 
 // ── POST /:id/start-production — link project + auto-create tasks ─────────────
-briefsRouter.post('/:id/start-production', isAdminOrLead, async (req, res) => {
+briefsRouter.post('/:id/start-production', requirePermission('content.write'), async (req, res) => {
   const { projectId, dueDate } = req.body
   if (!projectId) { res.status(400).json({ error: 'projectId es requerido' }); return }
 
@@ -328,7 +415,7 @@ briefsRouter.post('/:id/start-production', isAdminOrLead, async (req, res) => {
 })
 
 // ── DELETE /:id — delete brief (admin only) ───────────────────────────────────
-briefsRouter.delete('/:id', isAdminOrLead, async (req, res) => {
+briefsRouter.delete('/:id', requirePermission('content.write'), async (req, res) => {
   const brief = await prisma.contentBrief.findUnique({
     where: { id: req.params.id },
     select: { id: true, title: true, status: true },

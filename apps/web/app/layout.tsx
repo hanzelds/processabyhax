@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { Bebas_Neue, DM_Mono, DM_Sans } from 'next/font/google'
 import './globals.css'
 
@@ -24,14 +24,15 @@ const dmSans = DM_Sans({
   display: 'swap',
 })
 
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+}
+
 export const metadata: Metadata = {
   title: 'Processa — Hax',
   description: 'Sistema operativo interno de Hax',
-  viewport: {
-    width: 'device-width',
-    initialScale: 1,
-    viewportFit: 'cover', // iOS notch support
-  },
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',

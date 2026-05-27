@@ -9,6 +9,7 @@ import {
   sendCommentResolvedEmail,
   sendCommentOnStatusChangeEmail,
 } from '../lib/email'
+import { createNotifications } from '../lib/notify'
 
 export const briefCommentsRouter = Router({ mergeParams: true })
 
@@ -111,10 +112,34 @@ briefCommentsRouter.post('/', isAuth, async (req, res) => {
       )
       sendCommentNewEmail({ brief, comment: { id: comment.id, content: comment.content }, actorName: req.user!.name!, recipients: uniqueRecipients }).catch(console.error)
 
+      // In-app notifications for all recipients
+      if (uniqueRecipients.length) {
+        const snippet = comment.content.length > 80 ? `${comment.content.slice(0, 80)}…` : comment.content
+        createNotifications(uniqueRecipients.map(u => ({
+          userId: u.id,
+          type:   'brief_comment',
+          title:  `Comentario en: ${brief.title}`,
+          body:   `${req.user!.name ?? 'Alguien'}: "${snippet}"`,
+          link:   `/content/briefs?brief=${brief.id}`,
+        }))).catch(console.error)
+      }
+
       // Notify mentioned users specifically (only ACTIVE)
       if (mentionedIds.length) {
         const mentionedUsers = allUsers.filter(u => mentionedIds.includes(u.id) && u.id !== actorId && u.status === 'ACTIVE')
         sendCommentMentionEmail({ brief, comment: { id: comment.id, content: comment.content }, actorName: req.user!.name!, mentionedUsers }).catch(console.error)
+        // In-app mention notifications (only if not already in uniqueRecipients)
+        const alreadyNotified = new Set(uniqueRecipients.map(u => u.id))
+        const extraMentioned = mentionedUsers.filter(u => !alreadyNotified.has(u.id))
+        if (extraMentioned.length) {
+          createNotifications(extraMentioned.map(u => ({
+            userId: u.id,
+            type:   'brief_mention',
+            title:  `Te mencionaron en: ${brief.title}`,
+            body:   `${req.user!.name ?? 'Alguien'}: "${comment.content.slice(0, 80)}${comment.content.length > 80 ? '…' : ''}"`,
+            link:   `/content/briefs?brief=${brief.id}`,
+          }))).catch(console.error)
+        }
       }
     }
 

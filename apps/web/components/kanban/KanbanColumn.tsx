@@ -15,7 +15,7 @@ interface ColumnDef {
 interface Props {
   column: ColumnDef
   tasks: Task[]
-  projectId: string
+  projectId?: string
   isAdmin: boolean
   users: User[]
   onTaskUpdate: (task: Task) => void
@@ -36,7 +36,7 @@ export function KanbanColumn({ column, tasks, projectId, isAdmin, users, onTaskU
             {tasks.length}
           </span>
         </div>
-        {isAdmin && (
+        {isAdmin && projectId && (
           <NewTaskButton projectId={projectId} status={column.id} users={users} onCreated={onTaskAdd} />
         )}
       </div>

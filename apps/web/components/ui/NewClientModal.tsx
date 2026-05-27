@@ -40,6 +40,8 @@ export function NewClientModal() {
   const [website, setWebsite]             = useState('')
   const [description, setDescription]     = useState('')
   const [relationStart, setRelationStart] = useState('')
+  const [socialMedia, setSocialMedia]             = useState(false)
+  const [commercialPartner, setCommercialPartner] = useState(false)
 
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
@@ -47,7 +49,7 @@ export function NewClientModal() {
   function resetForm() {
     setName(''); setContactName(''); setContactInfo('')
     setIndustry(''); setTier('REGULAR'); setWebsite('')
-    setDescription(''); setRelationStart('')
+    setDescription(''); setRelationStart(''); setSocialMedia(false); setCommercialPartner(false)
     setError('')
   }
 
@@ -70,6 +72,8 @@ export function NewClientModal() {
         ...(website       && { website }),
         ...(description   && { description }),
         ...(relationStart && { relationStart: new Date(relationStart).toISOString() }),
+        socialMedia,
+        commercialPartner,
       })
       handleClose()
       router.refresh()
@@ -90,7 +94,7 @@ export function NewClientModal() {
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={handleClose}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div
             className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
             onClick={e => e.stopPropagation()}
@@ -115,7 +119,7 @@ export function NewClientModal() {
               </div>
 
               {/* Industry + Tier */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-slate-500 mb-1 block">Industria</label>
                   <select
@@ -140,7 +144,7 @@ export function NewClientModal() {
               </div>
 
               {/* Website + Relation start */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-medium text-slate-500 mb-1 block">Sitio web</label>
                   <input
@@ -173,6 +177,42 @@ export function NewClientModal() {
                   onChange={e => setDescription(e.target.value)}
                 />
               </div>
+
+              {/* Redes sociales */}
+              <label className="flex items-center gap-3 cursor-pointer select-none py-1">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={socialMedia}
+                    onChange={e => setSocialMedia(e.target.checked)}
+                  />
+                  <div className={`w-9 h-5 rounded-full transition-colors ${socialMedia ? 'bg-brand-700' : 'bg-slate-200'}`} />
+                  <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${socialMedia ? 'translate-x-4' : ''}`} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-slate-700">Cliente de redes sociales</p>
+                  <p className="text-xs text-slate-400">Aparece en Briefs y Calendario de contenido</p>
+                </div>
+              </label>
+
+              {/* Sociedad comercial */}
+              <label className="flex items-center gap-3 cursor-pointer select-none py-1">
+                <div className="relative">
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={commercialPartner}
+                    onChange={e => setCommercialPartner(e.target.checked)}
+                  />
+                  <div className={`w-9 h-5 rounded-full transition-colors ${commercialPartner ? 'bg-amber-500' : 'bg-slate-200'}`} />
+                  <div className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${commercialPartner ? 'translate-x-4' : ''}`} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-slate-700">Parte de la sociedad comercial</p>
+                  <p className="text-xs text-slate-400">Visible para socios comerciales (PARTNER)</p>
+                </div>
+              </label>
 
               {/* Divider */}
               <div className="border-t border-slate-100 pt-1">

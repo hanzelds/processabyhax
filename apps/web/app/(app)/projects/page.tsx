@@ -16,10 +16,15 @@ async function getProjects(token: string): Promise<Project[]> {
   return res.json()
 }
 
-export default async function ProjectsPage() {
+export default async function ProjectsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ client?: string }>
+}) {
   const user = await getServerUser()
   const cookieStore = await cookies()
   const token = cookieStore.get('token')?.value || ''
+  const { client: defaultClientId } = await searchParams
   const projects = await getProjects(token)
 
   const grouped = {
@@ -39,7 +44,9 @@ export default async function ProjectsPage() {
             {totalActive} activo{totalActive !== 1 ? 's' : ''} · {grouped.COMPLETED.length} completado{grouped.COMPLETED.length !== 1 ? 's' : ''}
           </p>
         </div>
-        {user?.role === 'ADMIN' && <NewProjectModal />}
+        {(user?.role === 'ADMIN' || user?.role === 'LEAD') && (
+          <NewProjectModal defaultClientId={defaultClientId} />
+        )}
       </div>
 
       {projects.length === 0 ? (

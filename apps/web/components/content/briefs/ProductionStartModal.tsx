@@ -58,7 +58,7 @@ export function ProductionStartModal({ brief, onSuccess, onCancel }: Props) {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[9900] flex items-center justify-center bg-black/50 p-4" onClick={onCancel}>
+    <div className="fixed inset-0 z-[9900] flex items-center justify-center bg-black/50 p-4">
       <div
         className="bg-white rounded-2xl shadow-2xl w-full max-w-md"
         onClick={e => e.stopPropagation()}

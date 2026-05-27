@@ -18,7 +18,7 @@ async function getClients(token: string): Promise<Client[]> {
 
 export default async function ClientsPage() {
   const user = await getServerUser()
-  if (user?.role !== 'ADMIN' && user?.role !== 'LEAD') redirect('/dashboard')
+  if (!['ADMIN', 'LEAD', 'PARTNER'].includes(user?.role ?? '')) redirect('/dashboard')
 
   const cookieStore = await cookies()
   const token = cookieStore.get('token')?.value || ''
@@ -38,7 +38,7 @@ export default async function ClientsPage() {
             {potential.length > 0 && ` · ${potential.length} potencial${potential.length !== 1 ? 'es' : ''}`}
           </p>
         </div>
-        <NewClientModal />
+        {user?.role !== 'PARTNER' && <NewClientModal />}
       </div>
 
       {clients.length === 0 ? (

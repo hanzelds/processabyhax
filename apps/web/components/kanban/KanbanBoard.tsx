@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -25,7 +25,7 @@ const COLUMNS: { id: TaskStatus; label: string; color: string }[] = [
 
 interface Props {
   initialTasks: Task[]
-  projectId: string
+  projectId?: string
   isAdmin: boolean
   users?: User[]
   onTasksChange?: (tasks: Task[]) => void
@@ -33,6 +33,16 @@ interface Props {
 
 export function KanbanBoard({ initialTasks, projectId, isAdmin, users = [], onTasksChange }: Props) {
   const [tasks, setTasks] = useState<Task[]>(initialTasks)
+
+  // Merge new tasks added externally (e.g. bulk creation) without resetting drag state
+  useEffect(() => {
+    setTasks(prev => {
+      const existingIds = new Set(prev.map(t => t.id))
+      const incoming = initialTasks.filter(t => !existingIds.has(t.id))
+      if (incoming.length === 0) return prev
+      return [...prev, ...incoming]
+    })
+  }, [initialTasks]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function syncTasks(updater: (prev: Task[]) => Task[]) {
     setTasks(prev => {

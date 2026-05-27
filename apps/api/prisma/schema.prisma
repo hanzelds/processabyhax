@@ -11,6 +11,7 @@ enum Role {
   ADMIN
   LEAD
   TEAM
+  PARTNER
 }
 
 enum UserStatus {
@@ -163,6 +164,7 @@ model User {
   docPagesApproved    DocPage[]                @relation("DocPageApprover")
   docVersions         DocPageVersion[]         @relation("DocVersionSaver")
   docFavorites        DocFavorite[]            @relation("DocFavoriteUser")
+  docMentions         DocMention[]             @relation("DocMentionUser")
   // Brief comments
   briefComments       BriefComment[]           @relation("BriefCommentAuthor")
   resolvedComments    BriefComment[]           @relation("BriefCommentResolver")
@@ -174,6 +176,11 @@ model User {
   scriptVersions      ScriptVersion[]      @relation("ScriptVersionSaver")
   scriptComments      ScriptComment[]      @relation("ScriptCommentAuthor")
   scriptMentions      ScriptCommentMention[] @relation("ScriptMentionUser")
+  notifications       Notification[]
+  timeEntries         TimeEntry[]
+  shootsCreated       Shoot[]        @relation("ShootCreator")
+  shootCrew           ShootCrew[]
+  workBlocks          WorkBlock[]    @relation("UserWorkBlocks")
 
   @@map("users")
 }
@@ -262,6 +269,8 @@ model Client {
   description   String?
   relationStart DateTime?
   color         String?
+  socialMedia       Boolean      @default(false)
+  commercialPartner Boolean      @default(false) @map("commercial_partner")
   createdAt     DateTime     @default(now())
   projects      Project[]
   contacts      ClientContact[]
@@ -272,8 +281,10 @@ model Client {
   contentPieces ContentPiece[]
   portalTokens  ClientPortalToken[]
   monthlyObjectives ClientMonthlyObjective[]
+  shoots        Shoot[]               @relation("ClientShoots")
   contentApprovals  ClientContentApproval[]
   scripts       Script[]          @relation("ClientScripts")
+  clientServices ClientService[]   @relation("ClientServices")
 
   @@map("clients")
 }
@@ -344,23 +355,27 @@ model ClientHistory {
 }
 
 model Project {
-  id             String        @id @default(cuid())
-  name           String
-  clientId       String
-  client         Client        @relation(fields: [clientId], references: [id])
-  teamspaceId    String?
-  teamspace      Teamspace?    @relation(fields: [teamspaceId], references: [id])
-  description    String?
-  status         ProjectStatus @default(ACTIVE)
-  startDate      DateTime
-  estimatedClose DateTime?
-  closedAt       DateTime?
-  createdAt      DateTime      @default(now())
-  tasks          Task[]
-  briefs         ContentBrief[]  @relation("BriefProject")
-  members        ProjectMember[]
-  files          ProjectFile[]
-  history        ProjectHistory[]
+  id               String         @id @default(cuid())
+  name             String
+  clientId         String
+  client           Client         @relation(fields: [clientId], references: [id])
+  clientServiceId  String?        @map("client_service_id")
+  clientService    ClientService? @relation(fields: [clientServiceId], references: [id])
+  teamspaceId      String?
+  teamspace        Teamspace?     @relation(fields: [teamspaceId], references: [id])
+  description      String?
+  status           ProjectStatus  @default(ACTIVE)
+  startDate        DateTime
+  estimatedClose   DateTime?
+  closedAt         DateTime?
+  createdAt        DateTime       @default(now())
+  tasks            Task[]
+  briefs           ContentBrief[] @relation("BriefProject")
+  members          ProjectMember[]
+  files            ProjectFile[]
+  history          ProjectHistory[]
+  timeEntries      TimeEntry[]
+  shoots           Shoot[]
 
   @@map("projects")
 }
@@ -369,8 +384,8 @@ model Task {
   id          String         @id @default(cuid())
   title       String
   description String?
-  projectId   String
-  project     Project        @relation(fields: [projectId], references: [id])
+  projectId   String?
+  project     Project?       @relation(fields: [projectId], references: [id])
   briefId     String?        @map("brief_id")
   brief       ContentBrief?  @relation("BriefTasks", fields: [briefId], references: [id], onDelete: SetNull)
   assignees   TaskAssignee[]
@@ -380,6 +395,7 @@ model Task {
   completedAt DateTime?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
+  timeEntries TimeEntry[]
 
   @@map("tasks")
 }
@@ -604,6 +620,7 @@ enum ContentType {
   post
   story
   video
+  real_estate_media
 }
 
 enum BriefStatus {
@@ -678,6 +695,7 @@ model ContentBrief {
   comments            BriefComment[]
   productionTasks     Task[]          @relation("BriefTasks")
   scripts             Script[]        @relation("BriefScripts")
+  shoots              Shoot[]         @relation("BriefShoots")
 
   @@index([clientId, status])
   @@index([status])
@@ -880,6 +898,7 @@ model DocPage {
   templateDesc  String?                        @map("template_desc")
   approvedById  String?                        @map("approved_by_id")
   approvedAt    DateTime?                      @map("approved_at")
+  fullWidth     Boolean   @default(false)      @map("full_width")
   createdById   String
   createdBy     User      @relation("DocPageCreator",  fields: [createdById],  references: [id])
   updatedById   String?
@@ -889,6 +908,7 @@ model DocPage {
   updatedAt     DateTime  @updatedAt
   versions      DocPageVersion[]
   favoritedBy   DocFavorite[]
+  mentions      DocMention[]
 
   @@index([contextType, contextId, parentId])
   @@index([parentId, sortOrder])
@@ -908,6 +928,18 @@ model DocPageVersion {
   @@unique([pageId, version])
   @@index([pageId, createdAt(sort: Desc)])
   @@map("doc_page_versions")
+}
+
+model DocMention {
+  id        String   @id @default(cuid())
+  pageId    String   @map("page_id")
+  page      DocPage  @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  userId    String   @map("user_id")
+  user      User     @relation("DocMentionUser", fields: [userId], references: [id])
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([pageId, userId])
+  @@map("doc_mentions")
 }
 
 model DocFavorite {
@@ -1037,4 +1069,263 @@ model ScriptCommentMention {
 
   @@unique([commentId, userId])
   @@map("script_comment_mentions")
+}
+
+// ── Logística ─────────────────────────────────────────────────────────────────
+
+enum GearCategory {
+  CAMERA
+  LENS
+  LIGHT
+  DRONE
+  MIC
+  AUDIO
+  STABILIZER
+  SUPPORT
+  OTHER
+}
+
+enum GearStatus {
+  AVAILABLE
+  IN_USE
+  MAINTENANCE
+  RETIRED
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  IN_USE
+  MAINTENANCE
+  RETIRED
+}
+
+enum ShootStatus {
+  DRAFT
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model GearItem {
+  id           String       @id @default(cuid())
+  name         String
+  category     GearCategory
+  brand        String?
+  model        String?
+  serialNumber String?      @unique @map("serial_number")
+  status       GearStatus   @default(AVAILABLE)
+  notes        String?
+  imageUrl     String?      @map("image_url")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt      @map("updated_at")
+  shootGear    ShootGear[]
+
+  @@index([status])
+  @@index([category])
+  @@map("gear_items")
+}
+
+model Location {
+  id           String    @id @default(cuid())
+  name         String
+  address      String?
+  contactName  String?   @map("contact_name")
+  contactPhone String?   @map("contact_phone")
+  contactEmail String?   @map("contact_email")
+  costPerDay   Decimal?  @db.Decimal(10, 2) @map("cost_per_day")
+  notes        String?
+  photoUrls    String[]  @default([]) @map("photo_urls")
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt      @map("updated_at")
+  shoots       Shoot[]
+
+  @@index([isActive])
+  @@map("locations")
+}
+
+model Vehicle {
+  id            String        @id @default(cuid())
+  name          String
+  plate         String        @unique
+  type          String
+  brand         String?
+  model         String?
+  year          Int?
+  color         String?
+  status        VehicleStatus @default(AVAILABLE)
+  notes         String?
+  imageUrl      String?       @map("image_url")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt      @map("updated_at")
+  shootVehicles ShootVehicle[]
+
+  @@index([status])
+  @@map("vehicles")
+}
+
+model Shoot {
+  id          String        @id @default(cuid())
+  title       String
+  status      ShootStatus   @default(DRAFT)
+  shootDate   DateTime      @map("shoot_date")
+  endDate     DateTime?     @map("end_date")
+  locationId  String?       @map("location_id")
+  location    Location?     @relation(fields: [locationId], references: [id])
+  projectId   String?       @map("project_id")
+  project     Project?      @relation(fields: [projectId], references: [id])
+  clientId    String?       @map("client_id")
+  client      Client?       @relation("ClientShoots", fields: [clientId], references: [id])
+  briefId     String?       @map("brief_id")
+  brief       ContentBrief? @relation("BriefShoots", fields: [briefId], references: [id], onDelete: SetNull)
+  notes       String?
+  createdById String        @map("created_by_id")
+  createdBy   User          @relation("ShootCreator", fields: [createdById], references: [id])
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt      @map("updated_at")
+  crew        ShootCrew[]
+  gear        ShootGear[]
+  vehicles    ShootVehicle[]
+
+  @@index([status])
+  @@index([shootDate])
+  @@index([projectId])
+  @@index([clientId])
+  @@map("shoots")
+}
+
+model ShootCrew {
+  id       String    @id @default(cuid())
+  shootId  String    @map("shoot_id")
+  shoot    Shoot     @relation(fields: [shootId], references: [id], onDelete: Cascade)
+  userId   String    @map("user_id")
+  user     User      @relation(fields: [userId], references: [id])
+  role     String
+  callTime DateTime? @map("call_time")
+
+  @@unique([shootId, userId])
+  @@map("shoot_crew")
+}
+
+model ShootGear {
+  id         String   @id @default(cuid())
+  shootId    String   @map("shoot_id")
+  shoot      Shoot    @relation(fields: [shootId], references: [id], onDelete: Cascade)
+  gearItemId String   @map("gear_item_id")
+  gearItem   GearItem @relation(fields: [gearItemId], references: [id])
+  notes      String?
+
+  @@unique([shootId, gearItemId])
+  @@map("shoot_gear")
+}
+
+model ShootVehicle {
+  id         String   @id @default(cuid())
+  shootId    String   @map("shoot_id")
+  shoot      Shoot    @relation(fields: [shootId], references: [id], onDelete: Cascade)
+  vehicleId  String   @map("vehicle_id")
+  vehicle    Vehicle  @relation(fields: [vehicleId], references: [id])
+  driverName String?  @map("driver_name")
+  notes      String?
+
+  @@unique([shootId, vehicleId])
+  @@map("shoot_vehicles")
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String
+  link      String?
+  readAt    DateTime? @map("read_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+model TimeEntry {
+  id          String    @id @default(cuid())
+  userId      String    @map("user_id")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taskId      String?   @map("task_id")
+  task        Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  projectId   String?   @map("project_id")
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  description String?
+  minutes     Int       @default(0)
+  date        DateTime  @db.Date
+  startedAt   DateTime? @map("started_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([userId, date(sort: Desc)])
+  @@index([taskId])
+  @@index([projectId])
+  @@map("time_entries")
+}
+
+// ── Servicios por cliente ─────────────────────────────────────────────────────
+
+enum ClientServiceStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+model Service {
+  id             String          @id @default(cuid())
+  name           String
+  icon           String?
+  color          String?
+  order          Int             @default(0)
+  createdAt      DateTime        @default(now()) @map("created_at")
+  clientServices ClientService[]
+
+  @@map("services")
+}
+
+model ClientService {
+  id        String              @id @default(cuid())
+  clientId  String              @map("client_id")
+  client    Client              @relation("ClientServices", fields: [clientId], references: [id])
+  serviceId String              @map("service_id")
+  service   Service             @relation(fields: [serviceId], references: [id])
+  name      String?
+  status    ClientServiceStatus @default(ACTIVE)
+  startDate DateTime?           @map("start_date")
+  endDate   DateTime?           @map("end_date")
+  notes     String?
+  createdAt DateTime            @default(now()) @map("created_at")
+  projects  Project[]
+
+  @@index([clientId])
+  @@index([serviceId])
+  @@map("client_services")
+}
+
+model WorkBlock {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  user           User     @relation("UserWorkBlocks", fields: [userId], references: [id])
+  date           DateTime @db.Date @map("date")
+  startTime      String   @map("start_time")
+  endTime        String   @map("end_time")
+  title          String?
+  notes          String?
+  color          String?
+  taskId         String?  @map("task_id")
+  shootId        String?  @map("shoot_id")
+  contentPieceId String?  @map("content_piece_id")
+  briefId        String?  @map("brief_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([userId, date])
+  @@map("work_blocks")
 }

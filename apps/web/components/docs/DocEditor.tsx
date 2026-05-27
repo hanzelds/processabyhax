@@ -1,14 +1,16 @@
 'use client'
 
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
-import { DocBlock, DocBlockType, DocPage, DocPageStatus, DocPageVersion } from '@/types'
+import { DocBlock, DocBlockType, DocPage, DocPageStatus, DocPageVersion, User } from '@/types'
 import { makeBlock, placeCursorAtEnd, placeCursorAtStart } from './docUtils'
 import { DocBlockRenderer } from './DocBlock'
 import { BlockMenu } from './BlockMenu'
 import { InlineToolbar } from './InlineToolbar'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 import { api } from '@/lib/api'
-import { Star, Clock, ChevronDown, Check, Printer, MoreHorizontal, LayoutTemplate, X } from 'lucide-react'
+import { DndContext, closestCenter, DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable'
+import { Star, Clock, ChevronDown, Check, Printer, MoreHorizontal, LayoutTemplate, X, Maximize2, Minimize2, Image as ImageIcon, Smile } from 'lucide-react'
 import { useToast } from '@/components/ui/Toast'
 import { DocTOC } from './DocTOC'
 
@@ -86,6 +88,67 @@ function PageStatusBadge({
   )
 }
 
+// ── Emoji picker ──────────────────────────────────────────────────────────────
+
+const EMOJI_GROUPS = [
+  { label: 'Documentos', emojis: ['📄','📃','📋','📊','📈','📉','📌','📍','🗂','📁','📂','🗃','🗄','📎','📏','📐'] },
+  { label: 'Ideas & Trabajo', emojis: ['💡','🔥','⚡','✅','🎯','🚀','🛠','🔧','⚙️','🧩','🧠','💼','📦','🔑','🏆','⭐'] },
+  { label: 'Comunicación', emojis: ['💬','📢','📣','📝','✏️','🖊','🖋','📮','✉️','📧','🔔','📡','🗣','💌','📰','🗞'] },
+  { label: 'Naturaleza & Símbolos', emojis: ['🌱','🌿','🍀','🌸','🌊','🌈','☀️','🌙','⭐','🔵','🟢','🟡','🔴','🟣','⚪','⬛'] },
+]
+
+function EmojiPickerPanel({ onSelect, onClose }: { onSelect: (emoji: string) => void; onClose: () => void }) {
+  const [filter, setFilter] = useState('')
+  const allEmojis = EMOJI_GROUPS.flatMap(g => g.emojis)
+  const filtered = filter ? allEmojis.filter(e => e.includes(filter)) : null
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <div className="absolute left-0 top-full mt-1 z-50 bg-white rounded-xl border border-slate-200 shadow-xl w-72 p-3">
+        <input
+          autoFocus
+          placeholder="Buscar emoji..."
+          value={filter}
+          onChange={e => setFilter(e.target.value)}
+          className="w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 mb-2 outline-none focus:border-[#17394f]/40"
+        />
+        {filtered ? (
+          <div className="flex flex-wrap gap-0.5">
+            {filtered.length === 0 && <p className="text-xs text-slate-400 py-2 w-full text-center">Sin resultados</p>}
+            {filtered.map((e, i) => (
+              <button key={i} onClick={() => { onSelect(e); onClose() }}
+                className="w-8 h-8 flex items-center justify-center text-lg rounded hover:bg-slate-100 transition-colors">
+                {e}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-60 overflow-y-auto">
+            {EMOJI_GROUPS.map(g => (
+              <div key={g.label}>
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">{g.label}</p>
+                <div className="flex flex-wrap gap-0.5">
+                  {g.emojis.map((e, i) => (
+                    <button key={i} onClick={() => { onSelect(e); onClose() }}
+                      className="w-8 h-8 flex items-center justify-center text-lg rounded hover:bg-slate-100 transition-colors">
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <button onClick={() => { onSelect(''); onClose() }}
+          className="mt-2 w-full text-xs text-slate-400 hover:text-slate-600 py-1 hover:bg-slate-50 rounded-lg transition-colors">
+          Quitar ícono
+        </button>
+      </div>
+    </>
+  )
+}
+
 // ── BlockMenu state ───────────────────────────────────────────────────────────
 
 interface BlockMenuState {
@@ -98,12 +161,13 @@ interface BlockMenuState {
 
 interface Props {
   page: DocPage
+  users?: User[]
   readOnly?: boolean
   onTitleChange?: (title: string) => void
   onPageCreated?: (newPageId: string, title: string) => void
 }
 
-export function DocEditor({ page, readOnly = false, onTitleChange, onPageCreated }: Props) {
+export function DocEditor({ page, users = [], readOnly = false, onTitleChange, onPageCreated }: Props) {
   const [blocks, setBlocks] = useState<DocBlock[]>(
     (page.content ?? []).length > 0 ? page.content : [makeBlock('paragraph')]
   )
@@ -121,8 +185,36 @@ export function DocEditor({ page, readOnly = false, onTitleChange, onPageCreated
   const [versions, setVersions]         = useState<DocPageVersion[]>([])
   const [versionsLoading, setVersionsLoading] = useState(false)
   const [showOptions, setShowOptions]   = useState(false)
+  const [icon, setIcon]                 = useState<string | null>(page.icon ?? null)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [cover, setCover]               = useState<string | null>(page.cover ?? null)
+  const [showCoverInput, setShowCoverInput] = useState(false)
+  const [coverInputValue, setCoverInputValue] = useState(page.cover ?? '')
+  const [fullWidth, setFullWidth]       = useState(page.fullWidth ?? false)
+  const [titleHovered, setTitleHovered] = useState(false)
 
-  const blockRefs = useRef<Map<string, HTMLElement>>(new Map())
+  const blockRefs  = useRef<Map<string, HTMLElement>>(new Map())
+  const titleRef   = useRef<HTMLDivElement>(null)
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    setBlocks(prev => {
+      const oldIdx = prev.findIndex(b => b.id === active.id)
+      const newIdx = prev.findIndex(b => b.id === over.id)
+      const next = arrayMove(prev, oldIdx, newIdx)
+      saveBlocks(next)
+      return next
+    })
+  }
+
+  // Set title content once on mount — avoids cursor-jump bug with dangerouslySetInnerHTML
+  useEffect(() => {
+    if (titleRef.current) titleRef.current.innerText = page.title
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const toast = useToast()
 
   const [saveError, setSaveError] = useState(false)
@@ -300,6 +392,26 @@ export function DocEditor({ page, readOnly = false, onTitleChange, onPageCreated
     }, 30)
   }
 
+  // ── Icon / cover / width ──────────────────────────────────────────────────
+
+  async function handleIconSelect(emoji: string) {
+    setIcon(emoji || null)
+    try { await api.patch(`/api/docs/pages/${page.id}/meta`, { icon: emoji || null }) } catch {}
+  }
+
+  async function handleCoverSave(url: string) {
+    const val = url.trim() || null
+    setCover(val)
+    setShowCoverInput(false)
+    try { await api.patch(`/api/docs/pages/${page.id}/meta`, { cover: val }) } catch {}
+  }
+
+  async function handleToggleWidth() {
+    const next = !fullWidth
+    setFullWidth(next)
+    try { await api.patch(`/api/docs/pages/${page.id}/meta`, { fullWidth: next }) } catch {}
+  }
+
   // ── v2 actions ────────────────────────────────────────────────────────────
 
   async function handleStatusChange(s: DocPageStatus) {
@@ -388,8 +500,105 @@ export function DocEditor({ page, readOnly = false, onTitleChange, onPageCreated
 
   // ── Render ────────────────────────────────────────────────────────────────
 
+  const STATUS_PRINT_LABEL: Record<string, string> = {
+    borrador: 'Borrador', en_revision: 'En revisión', aprobado: 'Aprobado', archivado: 'Archivado',
+  }
+
+  const printDate = new Date(page.updatedAt).toLocaleDateString('es-DO', {
+    day: 'numeric', month: 'long', year: 'numeric',
+  })
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
+
+      {/* Print CSS */}
+      <style>{`
+        @media print {
+          /* Ocultar todo via visibility para no colapsar el DOM */
+          * { visibility: hidden !important; }
+
+          /* Mostrar solo el doc print root y sus hijos */
+          #doc-print-root,
+          #doc-print-root * { visibility: visible !important; }
+
+          /* Posicionar en la esquina superior izquierda */
+          #doc-print-root {
+            display: block !important;
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            z-index: 99999 !important;
+            background: white !important;
+          }
+
+          @page {
+            size: A4 portrait;
+            margin: 20mm 22mm 22mm 22mm;
+          }
+
+          /* Tipografía limpia */
+          #doc-print-root p    { font-size: 11pt; line-height: 1.7; margin: 0 0 8pt; }
+          #doc-print-root h1   { font-size: 22pt; margin: 0 0 12pt; page-break-after: avoid; }
+          #doc-print-root h2   { font-size: 16pt; margin: 18pt 0 8pt; page-break-after: avoid; }
+          #doc-print-root h3   { font-size: 13pt; margin: 14pt 0 6pt; page-break-after: avoid; }
+          #doc-print-root ul, #doc-print-root ol { margin: 0 0 8pt; padding-left: 20pt; }
+          #doc-print-root li   { font-size: 11pt; line-height: 1.6; margin-bottom: 3pt; }
+          #doc-print-root pre, #doc-print-root code { page-break-inside: avoid; font-size: 9pt; }
+          #doc-print-root blockquote { page-break-inside: avoid; border-left: 3px solid #17394f; padding-left: 10pt; margin: 8pt 0; color: #475569; }
+          #doc-print-root img  { max-width: 100%; page-break-inside: avoid; }
+
+          /* Header y title block */
+          #doc-print-header      { display: flex !important; }
+          #doc-print-title-block { display: block !important; }
+        }
+      `}</style>
+
+      {/* Documento imprimible — invisible en pantalla, visible en @media print */}
+      <div id="doc-print-root" style={{ display: 'none' }}>
+        {/* Header con logo */}
+        <div id="doc-print-header" style={{
+          display: 'none',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          paddingBottom: '10px',
+          marginBottom: '20px',
+          borderBottom: '2px solid #17394f',
+        }}>
+          <img src="/hax-logo.svg" alt="HAX" style={{ height: '30px' }} />
+          <div style={{ textAlign: 'right', fontSize: '9pt', color: '#64748b' }}>
+            <div>{printDate}</div>
+            {page.pageStatus && (
+              <div style={{ fontWeight: 600, color: '#17394f', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '8pt' }}>
+                {STATUS_PRINT_LABEL[page.pageStatus] ?? page.pageStatus}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Título del documento */}
+        <div id="doc-print-title-block" style={{ display: 'none', marginBottom: '24pt', borderBottom: '1px solid #e2e8f0', paddingBottom: '14pt' }}>
+          {icon && <div style={{ fontSize: '36pt', marginBottom: '8pt' }}>{icon}</div>}
+          <h1 style={{ fontSize: '26pt', fontWeight: 700, color: '#0f172a', margin: 0, lineHeight: 1.15 }}>
+            {title || page.title}
+          </h1>
+          <div style={{ fontSize: '9pt', color: '#94a3b8', marginTop: '6pt' }}>
+            Autor: {page.createdBy.name}
+            {page.updatedBy && page.updatedBy.id !== page.createdBy.id && ` · Editado por: ${page.updatedBy.name}`}
+          </div>
+        </div>
+
+        {/* Contenido — clone del área de bloques renderizado para impresión */}
+        <div style={{ fontFamily: 'Georgia, "Times New Roman", serif', color: '#1e293b' }}
+          dangerouslySetInnerHTML={{
+            __html: blocks
+              .map(b => b.content?.html || '')
+              .filter(Boolean)
+              .join('\n'),
+          }}
+        />
+      </div>
+
       {/* Sticky top bar */}
       {!readOnly && (
         <div className="flex items-center justify-between px-6 py-2 border-b border-slate-100 bg-white/80 backdrop-blur-sm shrink-0 print:hidden">
@@ -408,6 +617,15 @@ export function DocEditor({ page, readOnly = false, onTitleChange, onPageCreated
               className={`p-1.5 rounded-lg transition-colors ${isFavorite ? 'text-amber-400 hover:text-amber-500' : 'text-slate-300 hover:text-amber-400'}`}
             >
               <Star className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
+            </button>
+
+            {/* Width toggle */}
+            <button
+              onClick={handleToggleWidth}
+              title={fullWidth ? 'Vista centrada' : 'Vista ancho completo'}
+              className={`p-1.5 rounded-lg transition-colors ${fullWidth ? 'text-[#17394f] bg-[#17394f]/8' : 'text-slate-300 hover:text-slate-600'}`}
+            >
+              {fullWidth ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
             </button>
 
             {/* Version history */}
@@ -466,15 +684,104 @@ export function DocEditor({ page, readOnly = false, onTitleChange, onPageCreated
       {/* Content area with optional TOC */}
       <div className="flex-1 overflow-y-auto flex">
         <div className="flex-1 min-w-0">
-        <div className="max-w-3xl mx-auto px-16 py-12">
-          {/* Page icon */}
-          <div className="mb-2 text-5xl">{page.icon ?? ''}</div>
+
+          {/* Cover image */}
+          {cover && (
+            <div className="relative group/cover h-48 w-full overflow-hidden bg-slate-100">
+              <img src={cover} alt="Portada" className="w-full h-full object-cover" />
+              {!readOnly && (
+                <div className="absolute inset-0 bg-black/0 group-hover/cover:bg-black/20 transition-colors flex items-end justify-end p-3 gap-2 opacity-0 group-hover/cover:opacity-100">
+                  <button onClick={() => { setCoverInputValue(cover ?? ''); setShowCoverInput(true) }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white/90 backdrop-blur-sm rounded-lg text-xs font-medium text-slate-700 hover:bg-white transition-colors shadow-sm">
+                    <ImageIcon className="w-3.5 h-3.5" />
+                    Cambiar
+                  </button>
+                  <button onClick={() => handleCoverSave('')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white/90 backdrop-blur-sm rounded-lg text-xs font-medium text-slate-700 hover:bg-white transition-colors shadow-sm">
+                    <X className="w-3.5 h-3.5" />
+                    Quitar
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Cover URL input panel */}
+          {showCoverInput && !readOnly && (
+            <div className="border-b border-slate-100 bg-slate-50 px-8 py-3 flex items-center gap-2">
+              <ImageIcon className="w-4 h-4 text-slate-400 shrink-0" />
+              <input
+                autoFocus
+                value={coverInputValue}
+                onChange={e => setCoverInputValue(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleCoverSave(coverInputValue)
+                  if (e.key === 'Escape') setShowCoverInput(false)
+                }}
+                placeholder="Pegar URL de imagen..."
+                className="flex-1 text-sm bg-transparent outline-none text-slate-700 placeholder:text-slate-300"
+              />
+              <button onClick={() => handleCoverSave(coverInputValue)}
+                className="px-3 py-1 bg-[#17394f] text-white text-xs rounded-lg hover:bg-[#17394f]/90 transition-colors">
+                Aplicar
+              </button>
+              <button onClick={() => setShowCoverInput(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 transition-colors">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
+        <div className={`${fullWidth ? 'px-12 py-10' : 'max-w-3xl mx-auto px-16 py-12'}`}>
+          {/* Page icon + hover controls */}
+          <div
+            className="relative mb-3"
+            onMouseEnter={() => setTitleHovered(true)}
+            onMouseLeave={() => setTitleHovered(false)}
+          >
+            <div className="relative inline-block">
+              {icon ? (
+                <button
+                  onClick={() => !readOnly && setShowEmojiPicker(e => !e)}
+                  className={`text-5xl leading-none ${!readOnly ? 'hover:opacity-80 transition-opacity' : ''} select-none`}
+                  title="Cambiar ícono"
+                >
+                  {icon}
+                </button>
+              ) : (
+                !readOnly && (
+                  <button
+                    onClick={() => setShowEmojiPicker(e => !e)}
+                    className={`flex items-center gap-1.5 text-sm text-slate-300 hover:text-slate-500 transition-colors py-1 ${titleHovered ? 'opacity-100' : 'opacity-0'}`}
+                  >
+                    <Smile className="w-4 h-4" />
+                    Agregar ícono
+                  </button>
+                )
+              )}
+              {showEmojiPicker && !readOnly && (
+                <EmojiPickerPanel onSelect={handleIconSelect} onClose={() => setShowEmojiPicker(false)} />
+              )}
+            </div>
+
+            {/* Add cover button (only when no cover) */}
+            {!readOnly && !cover && titleHovered && !showCoverInput && (
+              <button
+                onClick={() => setShowCoverInput(true)}
+                className="ml-3 flex items-center gap-1.5 text-sm text-slate-300 hover:text-slate-500 transition-colors py-1 inline-flex align-middle"
+              >
+                <ImageIcon className="w-4 h-4" />
+                Añadir portada
+              </button>
+            )}
+          </div>
 
           {/* Title */}
           {readOnly ? (
             <h1 className="text-4xl font-bold text-slate-900 mb-10 leading-tight">{title}</h1>
           ) : (
             <div
+              ref={titleRef}
               contentEditable
               suppressContentEditableWarning
               onInput={e => {
@@ -490,39 +797,43 @@ export function DocEditor({ page, readOnly = false, onTitleChange, onPageCreated
                 }
               }}
               className="text-4xl font-bold text-slate-900 mb-10 leading-tight outline-none min-h-[1em] empty:before:content-['Sin_título'] empty:before:text-slate-200 empty:before:pointer-events-none w-full"
-              dangerouslySetInnerHTML={{ __html: title }}
             />
           )}
 
           {/* Blocks */}
-          <div className="space-y-0.5">
-            {blocks.map(block => (
-              <DocBlockRenderer
-                key={block.id}
-                block={block}
-                focused={focusedId === block.id}
-                readOnly={readOnly}
-                blockRef={el => {
-                  if (el) blockRefs.current.set(block.id, el)
-                  else blockRefs.current.delete(block.id)
-                }}
-                onUpdate={updateBlockContent}
-                onUpdateHtml={updateBlockHtml}
-                onEnter={id => addBlockAfter(id)}
-                onBackspaceEmpty={deleteBlock}
-                onFocus={setFocusedId}
-                onArrowUp={focusPrev}
-                onArrowDown={focusNext}
-                onSlash={(id, pos, filter) => setBlockMenu({ blockId: id, filter, position: pos })}
-                onSlashClose={() => setBlockMenu(null)}
-                onMoveUp={id => moveBlock(id, -1)}
-                onMoveDown={id => moveBlock(id, 1)}
-                onDelete={deleteBlock}
-                onDuplicate={duplicateBlock}
-                onConvert={convertBlock}
-              />
-            ))}
-          </div>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={blocks.map(b => b.id)} strategy={verticalListSortingStrategy}>
+              <div className="space-y-0.5">
+                {blocks.map(block => (
+                  <DocBlockRenderer
+                    key={block.id}
+                    block={block}
+                    focused={focusedId === block.id}
+                    readOnly={readOnly}
+                    users={users}
+                    blockRef={el => {
+                      if (el) blockRefs.current.set(block.id, el)
+                      else blockRefs.current.delete(block.id)
+                    }}
+                    onUpdate={updateBlockContent}
+                    onUpdateHtml={updateBlockHtml}
+                    onEnter={id => addBlockAfter(id)}
+                    onBackspaceEmpty={deleteBlock}
+                    onFocus={setFocusedId}
+                    onArrowUp={focusPrev}
+                    onArrowDown={focusNext}
+                    onSlash={(id, pos, filter) => setBlockMenu({ blockId: id, filter, position: pos })}
+                    onSlashClose={() => setBlockMenu(null)}
+                    onMoveUp={id => moveBlock(id, -1)}
+                    onMoveDown={id => moveBlock(id, 1)}
+                    onDelete={deleteBlock}
+                    onDuplicate={duplicateBlock}
+                    onConvert={convertBlock}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
 
           {/* Click below blocks to add paragraph */}
           {!readOnly && (

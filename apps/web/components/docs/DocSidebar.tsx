@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { DocPageSummary, DocFavorite, DocPageStatus } from '@/types'
 import { api } from '@/lib/api'
-import { Plus, ChevronRight, FileText, Loader2, Trash2, Star, Home, LayoutTemplate } from 'lucide-react'
+import { Plus, ChevronRight, FileText, Loader2, Trash2, Star, Home, LayoutTemplate, Search, X } from 'lucide-react'
 import { useToast } from '@/components/ui/Toast'
 import { useConfirm } from '@/components/ui/ConfirmDialog'
 import { TemplatePickerModal } from './TemplatePickerModal'
@@ -156,11 +156,18 @@ interface Props {
   isAdmin: boolean
 }
 
+interface SearchResult { id: string; title: string; icon?: string | null; pageStatus: string }
+
 export function DocSidebar({ contextType, contextId, contextName, contextEmoji, currentPageId, initialPages, isAdmin }: Props) {
   const [pages, setPages] = useState(initialPages)
   const [creating, setCreating] = useState(false)
   const [favorites, setFavorites] = useState<DocFavorite[]>([])
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
+  const [searching, setSearching] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
   const toast  = useToast()
 
@@ -171,6 +178,33 @@ export function DocSidebar({ contextType, contextId, contextName, contextEmoji, 
       setFavorites(f.filter(fav => fav.page.contextType === contextType && fav.page.contextId === contextId))
     }).catch(() => {})
   }, [contextType, contextId])
+
+  const doSearch = useCallback(async (q: string) => {
+    if (!q.trim()) { setSearchResults([]); return }
+    setSearchLoading(true)
+    try {
+      const res = await api.get<SearchResult[]>(`/api/docs/search?q=${encodeURIComponent(q)}&contextType=${contextType}&contextId=${contextId}`)
+      setSearchResults(res)
+    } catch { setSearchResults([]) } finally { setSearchLoading(false) }
+  }, [contextType, contextId])
+
+  useEffect(() => {
+    const t = setTimeout(() => doSearch(searchQuery), 300)
+    return () => clearTimeout(t)
+  }, [searchQuery, doSearch])
+
+  function openSearch() {
+    setSearching(true)
+    setSearchQuery('')
+    setSearchResults([])
+    setTimeout(() => searchInputRef.current?.focus(), 50)
+  }
+
+  function closeSearch() {
+    setSearching(false)
+    setSearchQuery('')
+    setSearchResults([])
+  }
 
   async function refresh() {
     try {
@@ -205,12 +239,63 @@ export function DocSidebar({ contextType, contextId, contextName, contextEmoji, 
       <div className="w-60 shrink-0 bg-white border-r border-slate-200 flex flex-col h-full">
         {/* Header */}
         <div className="px-3 py-4 border-b border-slate-100">
-          <Link href={backHref} className="flex items-center gap-2 text-sm font-semibold text-slate-700 hover:text-[#17394f] transition-colors truncate">
-            <span>{contextEmoji ?? '📚'}</span>
-            <span className="truncate">{contextName}</span>
-          </Link>
+          <div className="flex items-center justify-between">
+            <Link href={backHref} className="flex items-center gap-2 text-sm font-semibold text-slate-700 hover:text-[#17394f] transition-colors truncate min-w-0">
+              <span>{contextEmoji ?? '📚'}</span>
+              <span className="truncate">{contextName}</span>
+            </Link>
+            <button
+              onClick={openSearch}
+              title="Buscar en docs"
+              className="w-6 h-6 flex items-center justify-center text-slate-300 hover:text-[#17394f] transition-colors shrink-0"
+            >
+              <Search className="w-3.5 h-3.5" />
+            </button>
+          </div>
           <p className="text-[10px] text-slate-400 mt-0.5 font-medium uppercase tracking-wider pl-6">Documentos</p>
         </div>
+
+        {/* Search panel */}
+        {searching && (
+          <div className="border-b border-slate-100">
+            <div className="flex items-center gap-2 px-3 py-2">
+              <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <input
+                ref={searchInputRef}
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Escape') closeSearch() }}
+                placeholder="Buscar páginas..."
+                className="flex-1 text-sm text-slate-700 bg-transparent outline-none placeholder:text-slate-300"
+              />
+              <button onClick={closeSearch} className="text-slate-300 hover:text-slate-500 transition-colors">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            {searchQuery.trim() && (
+              <div className="max-h-56 overflow-y-auto py-1">
+                {searchLoading && (
+                  <div className="flex items-center justify-center py-4">
+                    <Loader2 className="w-4 h-4 text-slate-300 animate-spin" />
+                  </div>
+                )}
+                {!searchLoading && searchResults.length === 0 && (
+                  <p className="text-xs text-slate-300 text-center py-4">Sin resultados</p>
+                )}
+                {!searchLoading && searchResults.map(r => (
+                  <button
+                    key={r.id}
+                    onClick={() => { router.push(`/docs/${r.id}`); closeSearch() }}
+                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 transition-colors text-left"
+                  >
+                    <span className="text-sm shrink-0">{r.icon ?? '📄'}</span>
+                    <span className="text-sm text-slate-700 truncate">{r.title || 'Sin título'}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Context home link */}
         <div className="px-2 pt-2">

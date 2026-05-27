@@ -108,3 +108,30 @@ body {
 
 /* More link hover */
 .sidebar-more-link:hover { color: #4a9cc4 !important; }
+
+/* ── Print base rules ─────────────────────────────────────────────────────── */
+
+/* ── Doc mention chip ─────────────────────────────────────────────────────── */
+.doc-mention {
+  display: inline;
+  color: #17394f;
+  background: #edf4f7;
+  border-radius: 4px;
+  padding: 0 3px;
+  font-weight: 600;
+  cursor: default;
+  user-select: text;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm 15mm 18mm 15mm;
+  }
+
+  /* Asegurar que los colores de fondo se impriman */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

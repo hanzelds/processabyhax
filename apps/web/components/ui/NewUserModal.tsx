@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
+import { Role } from '@/types'
 
 const AREAS = [
   'Diseño gráfico', 'Dirección de arte', 'Motion & video', 'Fotografía',
@@ -20,7 +21,7 @@ export function NewUserModal() {
   const [open, setOpen]     = useState(false)
   const [name, setName]     = useState('')
   const [email, setEmail]   = useState('')
-  const [role, setRole]     = useState<'ADMIN' | 'LEAD' | 'TEAM'>('TEAM')
+  const [role, setRole]     = useState<Role>('TEAM')
   const [area, setArea]     = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState('')
@@ -59,7 +60,7 @@ export function NewUserModal() {
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={handleClose}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-slate-100">
               <h3 className="font-semibold text-slate-900">Invitar miembro</h3>
@@ -114,14 +115,15 @@ export function NewUserModal() {
                     className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
                     value={email} onChange={e => setEmail(e.target.value)} />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs font-medium text-slate-500 mb-1 block">Rol</label>
                     <select className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400 bg-white"
-                      value={role} onChange={e => setRole(e.target.value as 'ADMIN' | 'LEAD' | 'TEAM')}>
+                      value={role} onChange={e => setRole(e.target.value as Role)}>
                       <option value="TEAM">Team</option>
                       <option value="LEAD">Lead</option>
                       <option value="ADMIN">Admin</option>
+                      <option value="PARTNER">Socio comercial</option>
                     </select>
                   </div>
                   <div>

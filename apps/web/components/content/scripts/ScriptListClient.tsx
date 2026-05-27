@@ -1,11 +1,15 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { User, Script, Client, ContentBrief, ScriptStatus } from '@/types'
 import { api } from '@/lib/api'
-import { FileText, Clapperboard, LayoutTemplate, Plus, Search, Clock, CheckCircle2, Archive, ChevronDown } from 'lucide-react'
+import {
+  FileText, Clapperboard, LayoutTemplate, Plus, Search,
+  Clock, CheckCircle2, Archive, ChevronDown, MoreHorizontal,
+  Pencil, Trash2, ExternalLink, Check, X,
+} from 'lucide-react'
 
 const STATUS_LABELS: Record<ScriptStatus, string> = {
   borrador: 'Borrador',
@@ -56,15 +60,19 @@ export function ScriptListClient({ me, initialScripts, clients, briefs }: Props)
 
   const isAdmin = me.role === 'ADMIN' || me.role === 'LEAD'
 
-  // Filter briefs by search text
+  // Filter briefs by search text — exclude briefs that already have a script
+  const availableBriefs = useMemo(() =>
+    briefs.filter(b => (b._count?.scripts ?? 0) === 0)
+  , [briefs])
+
   const filteredBriefs = useMemo(() => {
-    if (!briefSearch.trim()) return briefs.slice(0, 30)
+    if (!briefSearch.trim()) return availableBriefs.slice(0, 30)
     const q = briefSearch.toLowerCase()
-    return briefs.filter(b =>
+    return availableBriefs.filter(b =>
       b.title.toLowerCase().includes(q) ||
       b.client.name.toLowerCase().includes(q)
     ).slice(0, 20)
-  }, [briefs, briefSearch])
+  }, [availableBriefs, briefSearch])
 
   const selectedBrief = briefs.find(b => b.id === briefId)
 
@@ -88,6 +96,14 @@ export function ScriptListClient({ me, initialScripts, clients, briefs }: Props)
     setCreating(false); setBriefId(''); setBriefSearch(''); setTitle(''); setCreateError('')
   }
 
+  function selectBrief(b: ContentBrief) {
+    setBriefId(b.id)
+    setBriefSearch('')
+    setShowBriefDropdown(false)
+    // Auto-fill title with brief title if empty
+    setTitle(prev => prev.trim() ? prev : b.title)
+  }
+
   async function createScript() {
     if (!briefId) { setCreateError('Selecciona un brief'); return }
     if (!title.trim()) { setCreateError('Escribe un título para el guion'); return }
@@ -101,6 +117,14 @@ export function ScriptListClient({ me, initialScripts, clients, briefs }: Props)
     } finally {
       setSubmitting(false)
     }
+  }
+
+  function handleDelete(id: string) {
+    setScripts(prev => prev.filter(s => s.id !== id))
+  }
+
+  function handleRename(id: string, newTitle: string) {
+    setScripts(prev => prev.map(s => s.id === id ? { ...s, title: newTitle } : s))
   }
 
   const grouped = useMemo(() => {
@@ -185,21 +209,37 @@ export function ScriptListClient({ me, initialScripts, clients, briefs }: Props)
                   <span className="text-xs text-slate-400">{grouped[status].length}</span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                  {grouped[status].map(s => <ScriptCard key={s.id} script={s} />)}
+                  {grouped[status].map(s => (
+                    <ScriptCard
+                      key={s.id}
+                      script={s}
+                      isAdmin={isAdmin}
+                      onDelete={handleDelete}
+                      onRename={handleRename}
+                    />
+                  ))}
                 </div>
               </div>
             ))}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {filtered.map(s => <ScriptCard key={s.id} script={s} />)}
+            {filtered.map(s => (
+              <ScriptCard
+                key={s.id}
+                script={s}
+                isAdmin={isAdmin}
+                onDelete={handleDelete}
+                onRename={handleRename}
+              />
+            ))}
           </div>
         )}
       </div>
 
       {/* Create modal */}
       {creating && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={closeCreate}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
             <h2 className="text-lg font-semibold text-slate-900 mb-4">Nuevo guion</h2>
             <div className="space-y-4">
@@ -240,7 +280,7 @@ export function ScriptListClient({ me, initialScripts, clients, briefs }: Props)
                           <button
                             key={b.id}
                             type="button"
-                            onClick={() => { setBriefId(b.id); setBriefSearch(''); setShowBriefDropdown(false) }}
+                            onClick={() => selectBrief(b)}
                             className={`w-full text-left px-3 py-2.5 text-sm flex items-center gap-2.5 hover:bg-slate-50 ${b.id === briefId ? 'bg-[#17394f]/5' : ''}`}
                           >
                             <span className="text-[#17394f] flex-shrink-0">
@@ -262,7 +302,6 @@ export function ScriptListClient({ me, initialScripts, clients, briefs }: Props)
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Título del guion *</label>
                 <input
-                  autoFocus={!showBriefDropdown}
                   value={title}
                   onChange={e => setTitle(e.target.value)}
                   placeholder="Ej: Guion Reel Historia de marca..."
@@ -296,33 +335,142 @@ export function ScriptListClient({ me, initialScripts, clients, briefs }: Props)
   )
 }
 
-function ScriptCard({ script }: { script: Script }) {
+// ── Script Card ───────────────────────────────────────────────────────────────
+
+interface CardProps {
+  script: Script
+  isAdmin: boolean
+  onDelete: (id: string) => void
+  onRename: (id: string, title: string) => void
+}
+
+function ScriptCard({ script, isAdmin, onDelete, onRename }: CardProps) {
+  const [showMenu, setShowMenu] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [renameVal, setRenameVal] = useState(script.title)
+  const [deleting, setDeleting] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
   const lines = (script.content as any[]).length
 
+  // Close menu on outside click
+  useEffect(() => {
+    if (!showMenu) return
+    function handler(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setShowMenu(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showMenu])
+
+  async function doDelete() {
+    if (!confirm(`¿Eliminar el guion "${script.title}"? Esta acción no se puede deshacer.`)) return
+    setDeleting(true)
+    try {
+      await api.delete(`/api/scripts/${script.id}`)
+      onDelete(script.id)
+    } catch {
+      setDeleting(false)
+    }
+  }
+
+  async function doRename() {
+    const trimmed = renameVal.trim()
+    if (!trimmed || trimmed === script.title) { setRenaming(false); return }
+    try {
+      await api.patch(`/api/scripts/${script.id}`, { title: trimmed })
+      onRename(script.id, trimmed)
+    } catch { /* noop */ }
+    setRenaming(false)
+  }
+
+  if (deleting) {
+    return (
+      <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 flex items-center justify-center h-24 text-slate-400 text-sm">
+        Eliminando...
+      </div>
+    )
+  }
+
   return (
-    <Link href={`/content/scripts/${script.id}`} className="block group">
-      <div className="border border-slate-200 rounded-xl p-4 hover:border-[#17394f]/30 hover:shadow-sm transition-all bg-white">
-        <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-lg bg-[#17394f]/10 text-[#17394f] flex items-center justify-center flex-shrink-0 mt-0.5">
-            {TYPE_ICONS[script.type] ?? <FileText className="w-4 h-4" />}
-          </div>
-          <div className="flex-1 min-w-0">
+    <div className="border border-slate-200 rounded-xl p-4 hover:border-[#17394f]/30 hover:shadow-sm transition-all bg-white group relative">
+      <div className="flex items-start gap-3">
+        <div className="w-8 h-8 rounded-lg bg-[#17394f]/10 text-[#17394f] flex items-center justify-center flex-shrink-0 mt-0.5">
+          {TYPE_ICONS[script.type] ?? <FileText className="w-4 h-4" />}
+        </div>
+
+        <div className="flex-1 min-w-0">
+          {/* Title — editable inline */}
+          {renaming ? (
+            <div className="flex items-center gap-1 mb-1">
+              <input
+                autoFocus
+                value={renameVal}
+                onChange={e => setRenameVal(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') doRename(); if (e.key === 'Escape') setRenaming(false) }}
+                className="flex-1 text-sm font-medium border border-[#17394f]/40 rounded px-1.5 py-0.5 outline-none focus:ring-2 focus:ring-[#17394f]/20 min-w-0"
+              />
+              <button onClick={doRename} className="text-emerald-600 hover:text-emerald-700"><Check className="w-3.5 h-3.5" /></button>
+              <button onClick={() => setRenaming(false)} className="text-slate-400 hover:text-slate-600"><X className="w-3.5 h-3.5" /></button>
+            </div>
+          ) : (
             <div className="flex items-start justify-between gap-2">
-              <p className="font-medium text-slate-900 text-sm truncate group-hover:text-[#17394f]">{script.title}</p>
+              <Link href={`/content/scripts/${script.id}`} className="font-medium text-slate-900 text-sm truncate hover:text-[#17394f] block flex-1 min-w-0">
+                {script.title}
+              </Link>
               <span className={`inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${STATUS_COLORS[script.status]}`}>
                 {STATUS_ICONS[script.status]}
                 {STATUS_LABELS[script.status]}
               </span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5 truncate">{script.client.name} · {script.brief.title}</p>
-            <div className="flex items-center gap-3 mt-2 text-xs text-slate-400">
-              <span>{lines} {script.type === 'reel' ? 'escenas' : 'slides'}</span>
-              <span>{script._count.comments} comentarios</span>
-              <span>{script._count.versions} versiones</span>
-            </div>
+          )}
+
+          <p className="text-xs text-slate-400 mt-0.5 truncate">{script.client.name} · {script.brief.title}</p>
+          <div className="flex items-center gap-3 mt-2 text-xs text-slate-400">
+            <span>{lines} {script.type === 'reel' ? 'escenas' : 'slides'}</span>
+            <span>{script._count.comments} comentarios</span>
+            <span>{script._count.versions} versiones</span>
           </div>
         </div>
       </div>
-    </Link>
+
+      {/* Options button — visible on hover */}
+      {isAdmin && !renaming && (
+        <div className="absolute top-3 right-3" ref={menuRef}>
+          <button
+            onClick={e => { e.preventDefault(); setShowMenu(s => !s) }}
+            className="w-6 h-6 flex items-center justify-center rounded text-slate-300 hover:text-slate-500 hover:bg-slate-100 opacity-0 group-hover:opacity-100 transition-opacity"
+          >
+            <MoreHorizontal className="w-4 h-4" />
+          </button>
+          {showMenu && (
+            <div className="absolute right-0 top-7 bg-white border border-slate-200 rounded-xl shadow-lg py-1 z-20 w-44">
+              <Link
+                href={`/content/scripts/${script.id}`}
+                className="flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                onClick={() => setShowMenu(false)}
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
+                Abrir editor
+              </Link>
+              <button
+                onClick={() => { setShowMenu(false); setRenaming(true); setRenameVal(script.title) }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                <Pencil className="w-3.5 h-3.5 text-slate-400" />
+                Renombrar
+              </button>
+              <div className="border-t border-slate-100 my-1" />
+              <button
+                onClick={() => { setShowMenu(false); doDelete() }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Eliminar
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }

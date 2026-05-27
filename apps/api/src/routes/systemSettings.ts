@@ -104,23 +104,28 @@ systemSettingsRouter.get('/settings', async (_req, res) => {
 // ── PATCH /api/admin/system/settings ─────────────────────────────────────────
 
 systemSettingsRouter.patch('/settings', async (req, res) => {
-  const { userId } = req.user!
-  const updates = req.body as Record<string, string>
+  try {
+    const { userId } = req.user!
+    const updates = req.body as Record<string, string>
 
-  const allowed = new Set(Object.keys(SETTING_DEFAULTS))
-  const ops = Object.entries(updates).filter(([k]) => allowed.has(k))
+    const allowed = new Set(Object.keys(SETTING_DEFAULTS))
+    const ops = Object.entries(updates).filter(([k]) => allowed.has(k))
 
-  await Promise.all(ops.map(([key, value]) =>
-    prisma.systemSetting.upsert({
-      where: { key },
-      update: { value, updatedById: userId },
-      create: { key, value, updatedById: userId },
-    })
-  ))
+    await Promise.all(ops.map(([key, value]) =>
+      prisma.systemSetting.upsert({
+        where: { key },
+        update: { value, updatedById: userId },
+        create: { key, value, updatedById: userId },
+      })
+    ))
 
-  invalidateSettingsCache()
-  const settings = await getSettings()
-  res.json(settings)
+    invalidateSettingsCache()
+    const settings = await getSettings()
+    res.json(settings)
+  } catch (err) {
+    console.error('[SystemSettings PATCH]', err)
+    res.status(500).json({ error: 'Error al guardar configuración' })
+  }
 })
 
 // ── GET /api/admin/system/permissions ────────────────────────────────────────

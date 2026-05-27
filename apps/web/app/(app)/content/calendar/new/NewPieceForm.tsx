@@ -19,11 +19,12 @@ const ALL_COPY_STATUSES: CopyStatus[] = ['pendiente', 'en_revision', 'aprobado']
 const ALL_PIECE_STATUSES: ContentPieceStatus[] = ['listo', 'en_revision', 'en_edicion', 'programado', 'pausado']
 
 const SCRIPT_HINT: Record<ContentType, string> = {
-  reel:     'INTRO (0-3s): Hook que engancha\nDESARROLLO (3-45s): 3-5 puntos clave, uno por escena\nCIERRE (últimos 3s): CTA claro — suscríbete, comenta, guarda',
-  carrusel: 'SLIDE 1: Portada — título impactante\nSLIDE 2: Problema o contexto\nSLIDE 3-N: Un punto por slide (tip, dato, paso)\nSLIDE FINAL: CTA + contacto / logo',
-  post:     'Visual principal: descripción de imagen\nCopy de acompañamiento\nCTA: acción que buscamos',
-  story:    'Story 1: Visual / apertura\nStory 2-3: Desarrollo\nStory final: Link, sticker de acción o CTA',
-  video:    'INTRO: Hook (primeros 5s)\nDESARROLLO: Contenido principal (estructura por bloques)\nCIERRE: CTA y llamado a la acción',
+  reel:               'INTRO (0-3s): Hook que engancha\nDESARROLLO (3-45s): 3-5 puntos clave, uno por escena\nCIERRE (últimos 3s): CTA claro — suscríbete, comenta, guarda',
+  carrusel:           'SLIDE 1: Portada — título impactante\nSLIDE 2: Problema o contexto\nSLIDE 3-N: Un punto por slide (tip, dato, paso)\nSLIDE FINAL: CTA + contacto / logo',
+  post:               'Visual principal: descripción de imagen\nCopy de acompañamiento\nCTA: acción que buscamos',
+  story:              'Story 1: Visual / apertura\nStory 2-3: Desarrollo\nStory final: Link, sticker de acción o CTA',
+  video:              'INTRO: Hook (primeros 5s)\nDESARROLLO: Contenido principal (estructura por bloques)\nCIERRE: CTA y llamado a la acción',
+  real_estate_media:  'TOMAS AÉREAS: Vista general de la propiedad\nEXTERIORES: Fachada, jardín, piscina\nINTERIORES: Sala, cocina, habitaciones\nDETALLES: Acabados y amenidades\nCTA: Contacto y precio',
 }
 
 interface Props {

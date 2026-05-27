@@ -78,7 +78,6 @@ export function TaskModal({ task, isAdmin, users = [], onUpdate, onDelete, onClo
   return (
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
     >
       <div
         className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 sm:p-6 overflow-hidden"
@@ -109,7 +108,7 @@ export function TaskModal({ task, isAdmin, users = [], onUpdate, onDelete, onClo
               </select>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-slate-500 mb-1 block">Estado</label>
                 <select className={INPUT_CLS} value={status} onChange={e => setStatus(e.target.value as TaskStatus)}>

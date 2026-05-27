@@ -135,7 +135,7 @@ export function PieceModal({ piece, defaultDate, clients, isAdmin, onUpdate, onC
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-4">
       <div
         className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col"
         onClick={e => e.stopPropagation()}
@@ -186,7 +186,7 @@ export function PieceModal({ piece, defaultDate, clients, isAdmin, onUpdate, onC
                   </select>
                 </div>
               )}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className={LABEL}>Tipo *</label>
                   <select className={INPUT} value={type} onChange={e => setType(e.target.value as ContentType)}>
@@ -227,7 +227,7 @@ export function PieceModal({ piece, defaultDate, clients, isAdmin, onUpdate, onC
                 <textarea className={`${INPUT} resize-none`} rows={2} value={publicationNotes} onChange={e => setPublicationNotes(e.target.value)} placeholder="Instrucciones específicas para quien publica…" />
               </div>
               {isNew && (
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className={LABEL}>Fecha de publicación</label>
                     <input type="date" className={INPUT} value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} />
@@ -244,7 +244,7 @@ export function PieceModal({ piece, defaultDate, clients, isAdmin, onUpdate, onC
           {/* Detail: Info tab */}
           {!isNew && !editing && tab === 'info' && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div><p className={LABEL}>Cliente</p><p className="text-slate-700">{piece?.client.name}</p></div>
                 <div><p className={LABEL}>Tipo</p><p className="text-slate-700">{piece?.type}</p></div>
                 <div><p className={LABEL}>Plataformas</p><p className="text-slate-700">{piece?.platforms.join(', ')}</p></div>
@@ -259,7 +259,7 @@ export function PieceModal({ piece, defaultDate, clients, isAdmin, onUpdate, onC
               {/* Scheduling */}
               <div className="bg-slate-50 rounded-xl p-4 space-y-3">
                 <p className={LABEL}>Programación</p>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-slate-500 mb-1 block">Fecha</label>
                     <input type="date" className={INPUT} value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} />

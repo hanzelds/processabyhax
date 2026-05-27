@@ -30,7 +30,7 @@ export function ClientMetricsTab({ metrics }: Props) {
   return (
     <div className="space-y-6">
       {/* KPI Bar */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: 'Proyectos totales', value: metrics.totalProjects, color: 'text-slate-900' },
           { label: 'Proyectos activos', value: metrics.activeProjects, color: 'text-brand-700' },

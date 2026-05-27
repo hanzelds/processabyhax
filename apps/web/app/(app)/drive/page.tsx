@@ -31,7 +31,8 @@ export default async function DrivePage() {
 
   return (
     <DriveClient
-      isAdmin={me.role === 'ADMIN' || me.role === 'LEAD'}
+      isAdmin={me.role === 'ADMIN'}
+      isAdminOrLead={me.role === 'ADMIN' || me.role === 'LEAD'}
       initialStatus={status}
     />
   )

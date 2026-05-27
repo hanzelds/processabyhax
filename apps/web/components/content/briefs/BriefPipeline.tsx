@@ -6,11 +6,13 @@ import { ContentBrief, BriefStatus, User } from '@/types'
 import {
   BRIEF_STATUS_LABEL, BRIEF_STATUS_COLOR, ALL_BRIEF_STATUSES,
   CONTENT_TYPE_ICON, CONTENT_TYPE_LABEL, PLATFORM_LABEL, PLATFORM_COLOR,
+  CONTENT_TYPE_OPTIONS, PLATFORM_OPTIONS,
   clientBgColor, isLightColor,
 } from '@/lib/utils'
+import type { ContentType, ContentPlatform } from '@/types'
 import { api } from '@/lib/api'
 import { BriefModal } from './BriefModal'
-import { Plus, Clock, RefreshCw, LayoutGrid, List } from 'lucide-react'
+import { Plus, Clock, RefreshCw, LayoutGrid, List, ScrollText, Layers, Trash2, Check } from 'lucide-react'
 import { useConfirm } from '@/components/ui/ConfirmDialog'
 
 // ── Pipeline config ───────────────────────────────────────────────────────────
@@ -98,6 +100,12 @@ function BriefCard({ brief, onClick, onDragStart }: { brief: ContentBrief; onCli
         </div>
         <div className="flex items-center gap-2">
           {brief.isRecurring && <span title="Recurrente" className="text-slate-400"><RefreshCw className="w-3 h-3" /></span>}
+          {(brief._count?.scripts ?? 0) > 0 && (
+            <span title={`${brief._count!.scripts} guion${brief._count!.scripts > 1 ? 'es' : ''}`} className="flex items-center gap-0.5 text-[10px] font-semibold text-teal-600 bg-teal-50 border border-teal-200 px-1.5 py-0.5 rounded-full">
+              <ScrollText className="w-2.5 h-2.5" />
+              {brief._count!.scripts}
+            </span>
+          )}
           <span className={`text-[10px] flex items-center gap-0.5 ${timerColor(days, brief.status)}`}>
             <Clock className="w-3 h-3" />
             {days === 0 ? 'Hoy' : `${days}d`}
@@ -178,6 +186,7 @@ export function BriefPipeline({ initialBriefs, users, isAdmin, currentUserId, se
   const [filterStatus, setFilterStatus] = useState<BriefStatus | ''>('')
   const [draggingId, setDraggingId]     = useState<string | null>(null)
   const [updatingIds, setUpdatingIds]   = useState<Set<string>>(new Set())
+  const [showBulk, setShowBulk]         = useState(false)
 
   const filtered = briefs.filter(b => {
     if (filterStatus && b.status !== filterStatus) return false
@@ -267,13 +276,22 @@ export function BriefPipeline({ initialBriefs, users, isAdmin, currentUserId, se
         </div>
 
         {isAdmin && (
-          <button
-            onClick={() => router.push(`/content/briefs/new?clientId=${selectedClientId}`)}
-            className="flex items-center gap-1.5 bg-[#17394f] hover:bg-[#17394f]/90 text-white text-sm font-medium rounded-lg px-3 py-1.5 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Nuevo brief
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowBulk(true)}
+              className="flex items-center gap-1.5 border border-[#17394f] text-[#17394f] text-sm font-medium rounded-lg px-3 py-1.5 hover:bg-[#17394f]/5 transition-colors"
+            >
+              <Layers className="w-4 h-4" />
+              En masa
+            </button>
+            <button
+              onClick={() => router.push(`/content/briefs/new?clientId=${selectedClientId}`)}
+              className="flex items-center gap-1.5 bg-[#17394f] hover:bg-[#17394f]/90 text-white text-sm font-medium rounded-lg px-3 py-1.5 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Nuevo brief
+            </button>
+          </div>
         )}
       </div>
 
@@ -319,7 +337,7 @@ export function BriefPipeline({ initialBriefs, users, isAdmin, currentUserId, se
       {/* ── List view ── */}
       {view === 'list' && (
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden flex-1">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto"><table className="w-full min-w-[600px] text-sm">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50">
                 <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Brief</th>
@@ -421,11 +439,23 @@ export function BriefPipeline({ initialBriefs, users, isAdmin, currentUserId, se
                 </tr>
               )}
             </tbody>
-          </table>
+          </table></div>
         </div>
       )}
 
-      {/* Modal */}
+      {/* Bulk create modal */}
+      {showBulk && (
+        <BulkBriefModal
+          clientId={selectedClientId}
+          onClose={() => setShowBulk(false)}
+          onCreated={newBriefs => {
+            setBriefs(prev => [...newBriefs, ...prev])
+            setShowBulk(false)
+          }}
+        />
+      )}
+
+      {/* Brief detail modal */}
       {selectedBrief && (
         <BriefModal
           brief={selectedBrief}
@@ -438,6 +468,234 @@ export function BriefPipeline({ initialBriefs, users, isAdmin, currentUserId, se
           onClose={() => setSelectedBrief(null)}
         />
       )}
+    </div>
+  )
+}
+
+// ── BulkBriefModal ────────────────────────────────────────────────────────────
+
+type BriefRow = {
+  _id:       string
+  title:     string
+  type:      ContentType
+  platforms: ContentPlatform[]
+  status:    BriefStatus
+}
+
+function newRow(): BriefRow {
+  return {
+    _id:       Math.random().toString(36).slice(2),
+    title:     '',
+    type:      'reel',
+    platforms: ['instagram'],
+    status:    'idea',
+  }
+}
+
+function BulkBriefModal({
+  clientId,
+  onClose,
+  onCreated,
+}: {
+  clientId:  string
+  onClose:   () => void
+  onCreated: (briefs: ContentBrief[]) => void
+}) {
+  const [rows, setRows]         = useState<BriefRow[]>([newRow(), newRow(), newRow()])
+  const [submitting, setSubmit] = useState(false)
+  const [error, setError]       = useState('')
+
+  function updateRow(id: string, patch: Partial<BriefRow>) {
+    setRows(prev => prev.map(r => r._id === id ? { ...r, ...patch } : r))
+  }
+
+  function togglePlatform(id: string, p: ContentPlatform) {
+    setRows(prev => prev.map(r => {
+      if (r._id !== id) return r
+      const has = r.platforms.includes(p)
+      const next = has ? r.platforms.filter(x => x !== p) : [...r.platforms, p]
+      return { ...r, platforms: next }
+    }))
+  }
+
+  function addRow() { setRows(prev => [...prev, newRow()]) }
+  function removeRow(id: string) { setRows(prev => prev.filter(r => r._id !== id)) }
+
+  const validRows = rows.filter(r => r.title.trim() && r.platforms.length > 0)
+  const hasInvalid = rows.some(r => r.title.trim() && r.platforms.length === 0)
+
+  async function handleSubmit() {
+    if (validRows.length === 0) { setError('Añade al menos un brief con título y plataforma'); return }
+    setError(''); setSubmit(true)
+    try {
+      const created = await api.post<ContentBrief[]>('/api/briefs/bulk', {
+        clientId,
+        briefs: validRows.map(({ title, type, platforms, status }) => ({ title, type, platforms, status })),
+      })
+      onCreated(created)
+    } catch (e: any) {
+      setError(e.message || 'Error al crear los briefs')
+      setSubmit(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full flex flex-col"
+        style={{ maxWidth: 860, maxHeight: '90vh' }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div>
+            <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <Layers className="w-4 h-4 text-[#17394f]" />
+              Crear briefs en masa
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Completa las filas — las que tengan título y plataforma serán creadas
+            </p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">✕</button>
+        </div>
+
+        {/* Table */}
+        <div className="overflow-auto flex-1 px-6 py-4">
+          {/* Column headers */}
+          <div className="grid gap-2 mb-2 px-1" style={{ gridTemplateColumns: '1fr 120px 1fr auto' }}>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Título *</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tipo *</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Plataformas *</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Estado</span>
+          </div>
+
+          <div className="space-y-2">
+            {rows.map((row, idx) => {
+              const isValid = row.title.trim() && row.platforms.length > 0
+              const hasTitle = !!row.title.trim()
+              const missingPlatform = hasTitle && row.platforms.length === 0
+              return (
+                <div
+                  key={row._id}
+                  className={`grid gap-2 items-center p-2 rounded-xl border transition-colors ${
+                    isValid ? 'border-slate-200 bg-white' :
+                    missingPlatform ? 'border-amber-200 bg-amber-50/40' :
+                    'border-slate-100 bg-slate-50/50'
+                  }`}
+                  style={{ gridTemplateColumns: '1fr 120px 1fr auto' }}
+                >
+                  {/* Title */}
+                  <input
+                    value={row.title}
+                    onChange={e => updateRow(row._id, { title: e.target.value })}
+                    placeholder={`Brief ${idx + 1}…`}
+                    className="w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-[#17394f]/20 bg-white"
+                  />
+
+                  {/* Type */}
+                  <select
+                    value={row.type}
+                    onChange={e => updateRow(row._id, { type: e.target.value as ContentType })}
+                    className="text-sm border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-[#17394f]/20 bg-white w-full"
+                  >
+                    {CONTENT_TYPE_OPTIONS.map(o => (
+                      <option key={o.value} value={o.value}>{CONTENT_TYPE_ICON[o.value]} {o.label}</option>
+                    ))}
+                  </select>
+
+                  {/* Platforms */}
+                  <div className="flex flex-wrap gap-1">
+                    {PLATFORM_OPTIONS.map(p => {
+                      const active = row.platforms.includes(p.value)
+                      return (
+                        <button
+                          key={p.value}
+                          type="button"
+                          onClick={() => togglePlatform(row._id, p.value)}
+                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded transition-all ${
+                            active
+                              ? PLATFORM_COLOR[p.value]
+                              : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+                          }`}
+                        >
+                          {PLATFORM_LABEL[p.value]}
+                        </button>
+                      )
+                    })}
+                  </div>
+
+                  {/* Status + delete */}
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={row.status}
+                      onChange={e => updateRow(row._id, { status: e.target.value as BriefStatus })}
+                      className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-[#17394f]/20 bg-white"
+                    >
+                      {ALL_BRIEF_STATUSES.filter(s => s !== 'cancelado').map(s => (
+                        <option key={s} value={s}>{BRIEF_STATUS_LABEL[s]}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => removeRow(row._id)}
+                      disabled={rows.length === 1}
+                      className="p-1.5 text-slate-300 hover:text-red-400 disabled:opacity-30 transition-colors rounded"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Add row */}
+          <button
+            onClick={addRow}
+            className="mt-3 w-full flex items-center justify-center gap-1.5 py-2.5 border-2 border-dashed border-slate-200 rounded-xl text-sm text-slate-400 hover:border-[#17394f]/30 hover:text-[#17394f] transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Añadir fila
+          </button>
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            {validRows.length > 0 && (
+              <span className="text-xs text-slate-500 flex items-center gap-1">
+                <Check className="w-3.5 h-3.5 text-emerald-500" />
+                <strong className="text-slate-700">{validRows.length}</strong> brief{validRows.length !== 1 ? 's' : ''} listo{validRows.length !== 1 ? 's' : ''}
+              </span>
+            )}
+            {hasInvalid && (
+              <span className="text-xs text-amber-600">⚠ Algunas filas no tienen plataforma</span>
+            )}
+            {error && <span className="text-xs text-red-500">{error}</span>}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onClose}
+              className="border border-slate-200 text-slate-600 text-sm px-4 py-2 rounded-lg hover:bg-slate-50 transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={submitting || validRows.length === 0}
+              className="bg-[#17394f] text-white text-sm font-medium px-5 py-2 rounded-lg hover:bg-[#17394f]/90 disabled:opacity-40 transition-colors flex items-center gap-2"
+            >
+              {submitting ? (
+                <>Creando…</>
+              ) : (
+                <><Layers className="w-4 h-4" /> Crear {validRows.length > 0 ? validRows.length : ''} brief{validRows.length !== 1 ? 's' : ''}</>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

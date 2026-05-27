@@ -59,7 +59,7 @@ function ContactForm({ initial, onSave, onCancel }: { initial?: ClientContact; o
     <div className="p-3 bg-slate-50 rounded-xl space-y-2 mb-3">
       <input placeholder="Nombre *" value={name} onChange={e => setName(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
       <input placeholder="Cargo / rol" value={role} onChange={e => setRole(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
         <input placeholder="Teléfono" value={phone} onChange={e => setPhone(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
       </div>

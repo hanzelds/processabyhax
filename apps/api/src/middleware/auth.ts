@@ -5,7 +5,7 @@ import { hasPermission, Permission } from '../lib/permissions'
 
 export interface AuthPayload {
   userId: string
-  role: 'ADMIN' | 'LEAD' | 'TEAM'
+  role: 'ADMIN' | 'LEAD' | 'TEAM' | 'PARTNER'
   name?: string
   jti?: string
 }

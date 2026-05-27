@@ -1,14 +1,17 @@
-import { AdminKPIs, WorkloadEntry, ProjectProgress, ActivityFeedResponse } from '@/types/dashboard'
+import { AdminKPIs, WorkloadEntry, ProjectProgress, ActivityFeedResponse, AdminOverview } from '@/types/dashboard'
 import { AdminKPIBar } from './kpis/AdminKPIBar'
 import { WorkloadWidget } from './workload/WorkloadWidget'
 import { ProjectsProgressWidget } from './progress/ProjectsProgressWidget'
 import { ActivityFeed } from './activity/ActivityFeed'
+import { BriefPipelineWidget } from './briefs/BriefPipelineWidget'
+import { UpcomingDeadlines } from './deadlines/UpcomingDeadlines'
 import { TaskCard } from '@/components/ui/TaskCard'
 import { Task, AdminTaskAlerts } from '@/types'
 import Link from 'next/link'
 
 interface Props {
   kpis: AdminKPIs
+  overview: AdminOverview
   workload: WorkloadEntry[]
   progress: ProjectProgress[]
   activity: ActivityFeedResponse
@@ -16,7 +19,7 @@ interface Props {
   adminAlerts: AdminTaskAlerts
 }
 
-export function AdminDashboard({ kpis, workload, progress, activity, myTasks, adminAlerts }: Props) {
+export function AdminDashboard({ kpis, overview, workload, progress, activity, myTasks, adminAlerts }: Props) {
   const myTotal = myTasks.today.length + myTasks.pending.length + myTasks.overdue.length
   const hasAdminAlerts = adminAlerts.overdue > 0 || adminAlerts.dueSoon > 0 || adminAlerts.blocked > 0
 
@@ -49,15 +52,21 @@ export function AdminDashboard({ kpis, workload, progress, activity, myTasks, ad
         </div>
       )}
 
-      {/* KPI Bar */}
-      <AdminKPIBar kpis={kpis} />
+      {/* KPI Bar — 6 cards */}
+      <AdminKPIBar kpis={kpis} overview={overview} />
+
+      {/* Brief pipeline */}
+      <BriefPipelineWidget briefsByStatus={overview.briefsByStatus} />
 
       {/* Grid principal */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-        {/* Columna izquierda: Workload + Activity */}
+        {/* Columna izquierda: Workload + Próximos vencimientos */}
         <div className="lg:col-span-2 space-y-6">
           <WorkloadWidget data={workload} />
+          {overview.deadlines.length > 0 && (
+            <UpcomingDeadlines deadlines={overview.deadlines} />
+          )}
           <ActivityFeed initialData={activity} />
         </div>
 

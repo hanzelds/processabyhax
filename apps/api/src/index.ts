@@ -22,6 +22,16 @@ import { portalRouter } from './routes/portal'
 import { docsRouter } from './routes/docs'
 import { driveRouter } from './routes/drive'
 import scriptsRouter from './routes/scripts'
+import { notificationsRouter } from './routes/notifications'
+import { timeRouter } from './routes/time'
+import { reportsRouter } from './routes/reports'
+import { dayplanRouter } from './routes/dayplan'
+import { gearRouter } from './routes/gear'
+import { locationsRouter } from './routes/locations'
+import { vehiclesRouter } from './routes/vehicles'
+import { shootsRouter } from './routes/shoots'
+import { servicesRouter } from './routes/services'
+import { clientServicesRouter } from './routes/clientServices'
 import { sendTaskReminders } from './lib/taskRemindersJob'
 import { getSettings } from './lib/settings'
 
@@ -77,6 +87,16 @@ app.use('/api/portal',          portalRouter)
 app.use('/api/docs',            docsRouter)
 app.use('/api/drive',           driveRouter)
 app.use('/api/scripts',         scriptsRouter)
+app.use('/api/notifications',   notificationsRouter)
+app.use('/api/time',           timeRouter)
+app.use('/api/reports',        reportsRouter)
+app.use('/api/day-plan',       dayplanRouter)
+app.use('/api/gear',           gearRouter)
+app.use('/api/locations',      locationsRouter)
+app.use('/api/vehicles',       vehiclesRouter)
+app.use('/api/shoots',         shootsRouter)
+app.use('/api/services',      servicesRouter)
+app.use('/api/clients',       clientServicesRouter)
 
 app.all('*', (_, res) => res.status(404).json({ error: 'Not found' }))
 

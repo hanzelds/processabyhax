@@ -3,13 +3,14 @@
 import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { Client, ClientContact, Tag, ClientNote, ClientHistoryEntry, ClientMetrics } from '@/types'
+import { Client, ClientContact, Tag, ClientNote, ClientHistoryEntry, ClientMetrics, ClientService, Role } from '@/types'
 import { CLIENT_STATUS_LABEL, CLIENT_STATUS_COLOR, CLIENT_TIER_LABEL, CLIENT_TIER_COLOR, clientBgColor } from '@/lib/utils'
 import { ClientTabs, ClientTabId } from './ClientTabs'
 import { ClientInfoBlock } from './profile/ClientInfoBlock'
 import { ClientTagsBlock } from './profile/ClientTagsBlock'
 import { ClientContactsBlock } from './profile/ClientContactsBlock'
 import { ClientProjectsTab } from './projects/ClientProjectsTab'
+import { ClientServicesTab } from './services/ClientServicesTab'
 import { ClientMetricsTab } from './metrics/ClientMetricsTab'
 import { ClientNotesTab } from './notes/ClientNotesTab'
 import { ClientHistoryTab } from './history/ClientHistoryTab'
@@ -32,10 +33,12 @@ interface Props {
   historyData: HistoryData
   currentUserId: string
   isAdmin: boolean
+  userRole: Role
   initialDocs: DocPageSummary[]
+  clientServices: ClientService[]
 }
 
-export function ClientDetailClient({ client: initialClient, contacts, metrics, notesFeed, historyData, currentUserId, isAdmin, initialDocs }: Props) {
+export function ClientDetailClient({ client: initialClient, contacts, metrics, notesFeed, historyData, currentUserId, isAdmin, userRole, initialDocs, clientServices }: Props) {
   const [client, setClient]     = useState(initialClient)
   const searchParams            = useSearchParams()
   const tabParam                = searchParams.get('tab') as ClientTabId | null
@@ -131,6 +134,15 @@ export function ClientDetailClient({ client: initialClient, contacts, metrics, n
           clientId={client.id}
           projects={client.projects ?? []}
           isAdmin={isAdmin}
+          userRole={userRole}
+        />
+      )}
+
+      {activeTab === 'services' && (
+        <ClientServicesTab
+          clientId={client.id}
+          initialServices={clientServices}
+          userRole={userRole}
         />
       )}
 

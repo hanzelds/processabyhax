@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { prisma } from '../lib/prisma'
 import { isAuth } from '../middleware/auth'
 import { v4 as uuidv4 } from 'uuid'
+import { createNotification } from '../lib/notify'
 
 export const docsRouter = Router()
 
@@ -23,6 +24,7 @@ const PAGE_SELECT = {
   templateDesc: true,
   approvedById: true,
   approvedAt: true,
+  fullWidth: true,
   createdAt: true,
   updatedAt: true,
   createdBy:  { select: { id: true, name: true } },
@@ -334,6 +336,26 @@ docsRouter.post('/pages/:id/children', isAuth, async (req, res) => {
   }
 })
 
+// ── Mention extraction helper ─────────────────────────────────────────────────
+
+type BlockLike = { content?: { html?: string; items?: string[] } }
+
+function extractDocMentionIds(blocks: BlockLike[]): string[] {
+  const re = /data-user-id="([^"]+)"/g
+  const ids = new Set<string>()
+  for (const block of blocks) {
+    const sources: string[] = []
+    if (block.content?.html)                       sources.push(block.content.html)
+    if (Array.isArray(block.content?.items))       sources.push(...block.content.items)
+    for (const src of sources) {
+      let m: RegExpExecArray | null
+      const local = new RegExp(re.source, 'g')
+      while ((m = local.exec(src)) !== null) ids.add(m[1])
+    }
+  }
+  return [...ids]
+}
+
 // ── PUT /api/docs/pages/:id — save content (autosave + version snapshot) ─────
 
 const VERSION_DEBOUNCE_MS = 5 * 60 * 1000 // 5 minutes
@@ -397,9 +419,49 @@ docsRouter.put('/pages/:id', isAuth, async (req, res) => {
     const page = await prisma.docPage.update({
       where: { id: req.params.id },
       data: { content, updatedById: req.user!.userId },
-      select: { id: true, updatedAt: true },
+      select: { id: true, title: true, updatedAt: true },
     })
     res.json(page)
+
+    // Fire-and-forget: process mentions without blocking autosave response
+    ;(async () => {
+      const actorId    = req.user!.userId
+      const pageId     = req.params.id
+      const mentionedIds = extractDocMentionIds(content as BlockLike[])
+
+      const existing    = await prisma.docMention.findMany({ where: { pageId } })
+      const existingSet = new Set(existing.map((m: { userId: string }) => m.userId))
+      const mentionedSet = new Set(mentionedIds)
+
+      const newIds     = mentionedIds.filter(id => !existingSet.has(id) && id !== actorId)
+      const removedIds = [...existingSet].filter(id => !mentionedSet.has(id))
+
+      if (newIds.length > 0) {
+        const actor = await prisma.user.findUnique({ where: { id: actorId }, select: { name: true } })
+        await Promise.all([
+          ...newIds.map(userId =>
+            createNotification({
+              userId,
+              type: 'doc_mention',
+              title: 'Te mencionaron en un documento',
+              body: `${actor?.name ?? 'Alguien'} te mencionó en "${page.title || 'Sin título'}"`,
+              link: `/docs/${pageId}`,
+            }).catch(console.error)
+          ),
+          prisma.docMention.createMany({
+            data: newIds.map(userId => ({ pageId, userId })),
+            skipDuplicates: true,
+          }),
+        ])
+      }
+
+      if (removedIds.length > 0) {
+        await prisma.docMention.deleteMany({
+          where: { pageId, userId: { in: removedIds } },
+        })
+      }
+    })().catch(console.error)
+
   } catch (e) {
     console.error(e); res.status(500).json({ error: 'Error al guardar' })
   }
@@ -408,12 +470,13 @@ docsRouter.put('/pages/:id', isAuth, async (req, res) => {
 // ── PATCH /api/docs/pages/:id/meta ───────────────────────────────────────────
 
 docsRouter.patch('/pages/:id/meta', isAuth, async (req, res) => {
-  const { title, icon, cover } = req.body
+  const { title, icon, cover, fullWidth } = req.body
   try {
     const data: Record<string, unknown> = { updatedById: req.user!.userId }
-    if (title !== undefined) data.title = title || 'Sin título'
-    if (icon  !== undefined) data.icon  = icon  || null
-    if (cover !== undefined) data.cover = cover || null
+    if (title     !== undefined) data.title     = title || 'Sin título'
+    if (icon      !== undefined) data.icon      = icon  || null
+    if (cover     !== undefined) data.cover     = cover || null
+    if (fullWidth !== undefined) data.fullWidth = Boolean(fullWidth)
 
     const page = await prisma.docPage.update({
       where: { id: req.params.id },
@@ -575,6 +638,249 @@ docsRouter.get('/:contextType/:contextId', isAuth, async (req, res) => {
     res.json(buildTree(pages as PageRow[]))
   } catch (e) {
     console.error(e); res.status(500).json({ error: 'Error al cargar páginas' })
+  }
+})
+
+// ── POST /api/docs/import — import pages from Notion export ──────────────────
+
+function mdInlineToHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/~~(.+?)~~/g, '<s>$1</s>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // strip links, keep label
+}
+
+function parseMarkdownToBlocks(md: string): object[] {
+  const lines = md.split('\n')
+  const blocks: object[] = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+    const trimmed = line.trim()
+
+    // Headings
+    if (/^#{1} /.test(trimmed)) {
+      blocks.push({ id: uuidv4(), type: 'heading_1', content: { html: mdInlineToHtml(trimmed.slice(2).trim()) } })
+      i++; continue
+    }
+    if (/^#{2} /.test(trimmed)) {
+      blocks.push({ id: uuidv4(), type: 'heading_2', content: { html: mdInlineToHtml(trimmed.slice(3).trim()) } })
+      i++; continue
+    }
+    if (/^#{3,} /.test(trimmed)) {
+      const level = trimmed.match(/^#+/)![0].length
+      blocks.push({ id: uuidv4(), type: 'heading_3', content: { html: mdInlineToHtml(trimmed.slice(level + 1).trim()) } })
+      i++; continue
+    }
+
+    // Code block
+    if (trimmed.startsWith('```')) {
+      const lang = trimmed.slice(3).trim() || 'plaintext'
+      const codeLines: string[] = []
+      i++
+      while (i < lines.length && !lines[i].trim().startsWith('```')) {
+        codeLines.push(lines[i])
+        i++
+      }
+      blocks.push({ id: uuidv4(), type: 'code', content: { language: lang, text: codeLines.join('\n') } })
+      i++; continue
+    }
+
+    // Divider
+    if (/^[-*_]{3,}$/.test(trimmed)) {
+      blocks.push({ id: uuidv4(), type: 'divider', content: {} })
+      i++; continue
+    }
+
+    // Blockquote → callout
+    if (trimmed.startsWith('> ')) {
+      const quoteLines: string[] = [trimmed.slice(2)]
+      i++
+      while (i < lines.length && lines[i].trim().startsWith('> ')) {
+        quoteLines.push(lines[i].trim().slice(2))
+        i++
+      }
+      blocks.push({ id: uuidv4(), type: 'callout', content: { icon: '💡', html: mdInlineToHtml(quoteLines.join(' ')) } })
+      continue
+    }
+
+    // Bulleted list — collect consecutive items
+    if (/^[-*+] /.test(trimmed)) {
+      const items: string[] = [mdInlineToHtml(trimmed.replace(/^[-*+] /, ''))]
+      i++
+      while (i < lines.length && /^[-*+] /.test(lines[i].trim())) {
+        items.push(mdInlineToHtml(lines[i].trim().replace(/^[-*+] /, '')))
+        i++
+      }
+      blocks.push({ id: uuidv4(), type: 'bulleted_list', content: { items } })
+      continue
+    }
+
+    // Numbered list
+    if (/^\d+\. /.test(trimmed)) {
+      const items: string[] = [mdInlineToHtml(trimmed.replace(/^\d+\. /, ''))]
+      i++
+      while (i < lines.length && /^\d+\. /.test(lines[i].trim())) {
+        items.push(mdInlineToHtml(lines[i].trim().replace(/^\d+\. /, '')))
+        i++
+      }
+      blocks.push({ id: uuidv4(), type: 'numbered_list', content: { items } })
+      continue
+    }
+
+    // Image
+    const imgMatch = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)/)
+    if (imgMatch) {
+      blocks.push({ id: uuidv4(), type: 'image', content: { url: imgMatch[2], caption: imgMatch[1] } })
+      i++; continue
+    }
+
+    // Skip empty lines
+    if (!trimmed) { i++; continue }
+
+    // Paragraph
+    const html = mdInlineToHtml(trimmed)
+    if (html) blocks.push({ id: uuidv4(), type: 'paragraph', content: { html } })
+    i++
+  }
+
+  if (blocks.length === 0) blocks.push({ id: uuidv4(), type: 'paragraph', content: { html: '' } })
+  return blocks
+}
+
+function parseCsvToBlocks(csv: string): object[] {
+  const rows = csv.split('\n').map(l => {
+    const cells: string[] = []
+    let cur = '', inQuote = false
+    for (const ch of l) {
+      if (ch === '"') { inQuote = !inQuote; continue }
+      if (ch === ',' && !inQuote) { cells.push(cur.trim()); cur = ''; continue }
+      cur += ch
+    }
+    cells.push(cur.trim())
+    return cells
+  }).filter(r => r.some(c => c))
+
+  if (rows.length === 0) return [{ id: uuidv4(), type: 'paragraph', content: { html: '' } }]
+
+  const headers = rows[0]
+  const blocks: object[] = []
+
+  if (rows.length === 1) {
+    // Only headers — render as list
+    blocks.push({ id: uuidv4(), type: 'bulleted_list', content: { items: headers.filter(Boolean) } })
+    return blocks
+  }
+
+  for (let r = 1; r < rows.length; r++) {
+    if (r > 1) blocks.push({ id: uuidv4(), type: 'divider', content: {} })
+    const items = headers.map((h, j) => `${h}: ${rows[r][j] ?? ''}`).filter(Boolean)
+    if (items.length) blocks.push({ id: uuidv4(), type: 'bulleted_list', content: { items } })
+  }
+
+  return blocks.length ? blocks : [{ id: uuidv4(), type: 'paragraph', content: { html: '' } }]
+}
+
+interface ImportItem {
+  title: string
+  rawContent: string
+  format: 'md' | 'csv'
+  icon?: string
+  parentIndex?: number // index in items array; undefined = root page
+}
+
+docsRouter.post('/import', isAuth, async (req, res) => {
+  const { contextType, contextId, items } = req.body as {
+    contextType: string
+    contextId: string
+    items: ImportItem[]
+  }
+
+  if (!VALID_CONTEXT_TYPES.includes(contextType)) {
+    return res.status(400).json({ error: 'contextType inválido' })
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'No hay páginas para importar' })
+  }
+  if (items.length > 50) {
+    return res.status(400).json({ error: 'Máximo 50 páginas por importación' })
+  }
+
+  try {
+    const userId = req.user!.userId
+    // createdIds[i] = DB id of item i (after creation)
+    const createdIds: (string | null)[] = new Array(items.length).fill(null)
+
+    // Get base sortOrder for the context
+    const maxSort = await prisma.docPage.aggregate({
+      where: { contextType, contextId, parentId: null },
+      _max: { sortOrder: true },
+    })
+    let nextRootSort = (maxSort._max.sortOrder ?? -1) + 1
+
+    // Create root pages first (parentIndex === undefined), then children
+    const rootIndices     = items.map((it, i) => ({ it, i })).filter(({ it }) => it.parentIndex === undefined)
+    const childrenIndices = items.map((it, i) => ({ it, i })).filter(({ it }) => it.parentIndex !== undefined)
+
+    for (const { it, i } of rootIndices) {
+      const content = it.format === 'csv'
+        ? parseCsvToBlocks(it.rawContent)
+        : parseMarkdownToBlocks(it.rawContent)
+
+      const page = await prisma.docPage.create({
+        data: {
+          title:       it.title || 'Sin título',
+          icon:        it.icon || null,
+          contextType,
+          contextId,
+          sortOrder:   nextRootSort++,
+          content:     content as object[],
+          createdById: userId,
+        },
+        select: { id: true },
+      })
+      createdIds[i] = page.id
+    }
+
+    for (const { it, i } of childrenIndices) {
+      const parentId = it.parentIndex !== undefined ? createdIds[it.parentIndex] : null
+      if (!parentId) continue // parent failed — skip
+
+      const childMaxSort = await prisma.docPage.aggregate({
+        where: { parentId },
+        _max: { sortOrder: true },
+      })
+      const childSort = (childMaxSort._max.sortOrder ?? -1) + 1
+
+      const content = it.format === 'csv'
+        ? parseCsvToBlocks(it.rawContent)
+        : parseMarkdownToBlocks(it.rawContent)
+
+      const page = await prisma.docPage.create({
+        data: {
+          title:       it.title || 'Sin título',
+          icon:        it.icon || null,
+          contextType,
+          contextId,
+          parentId,
+          sortOrder:   childSort,
+          content:     content as object[],
+          createdById: userId,
+        },
+        select: { id: true },
+      })
+      createdIds[i] = page.id
+    }
+
+    const created = items.map((it, i) => ({ title: it.title, id: createdIds[i] })).filter(p => p.id)
+    res.status(201).json({ created, firstPageId: created[0]?.id ?? null })
+  } catch (e) {
+    console.error(e); res.status(500).json({ error: 'Error al importar páginas' })
   }
 })
 

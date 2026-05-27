@@ -8,8 +8,8 @@ import { useSidebarStore } from '@/store/sidebarStore'
 import { User } from '@/types'
 import { SidebarTeamspaces } from './SidebarTeamspaces'
 import {
-  CheckSquare, FolderKanban, Users, Building2,
-  Settings, LogOut, ChevronLeft, ChevronRight, CalendarDays, Clapperboard, SlidersHorizontal, BookOpen, HardDrive, ScrollText, type LucideIcon,
+  CheckSquare, ListTodo, FolderKanban, Users, Building2,
+  Settings, LogOut, ChevronLeft, ChevronRight, CalendarDays, Clapperboard, SlidersHorizontal, BookOpen, HardDrive, ScrollText, BarChart3, Film, type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -110,6 +110,13 @@ function SectionLabel({ label, collapsed }: { label: string; collapsed: boolean 
 // ── Nav sections config ───────────────────────────────────────────────────────
 
 function getNavSections(role: string, permissions: string[]) {
+  if (role === 'PARTNER') {
+    return [{
+      title: 'Clientes',
+      items: [{ href: '/clients', label: 'Clientes', icon: Building2, hasBadge: false }],
+    }]
+  }
+
   const isTeam = role === 'TEAM'
   const canSeeCalendar    = true
   const canSeePreproduccion = true
@@ -125,8 +132,10 @@ function getNavSections(role: string, permissions: string[]) {
     {
       title: 'Principal',
       items: [
-        { href: '/dashboard', label: 'Mis tareas', icon: CheckSquare,  hasBadge: true },
-        { href: '/projects',  label: 'Proyectos',  icon: FolderKanban, hasBadge: false },
+        { href: '/dashboard',  label: 'Mis tareas',       icon: CheckSquare,  hasBadge: true  },
+        { href: '/tasks',      label: 'Tareas personales', icon: ListTodo,    hasBadge: false },
+        { href: '/projects',   label: 'Proyectos',         icon: FolderKanban, hasBadge: false },
+        { href: '/logistica',  label: 'Logística',         icon: Film,         hasBadge: false },
       ],
     },
     ...(contentItems.length > 0 ? [{
@@ -138,6 +147,13 @@ function getNavSections(role: string, permissions: string[]) {
       items: [
         { href: '/clients',     label: 'Clientes', icon: Building2, hasBadge: false },
         { href: '/admin/users', label: 'Equipo',   icon: Users,     hasBadge: false },
+      ],
+    }] : []),
+    ...(role === 'ADMIN' ? [{
+      title: 'Administración',
+      items: [
+        { href: '/admin/day',     label: 'Mi Día',    icon: CalendarDays, hasBadge: false },
+        { href: '/admin/reports', label: 'Reportes',  icon: BarChart3,    hasBadge: false },
       ],
     }] : []),
   ]
@@ -280,7 +296,7 @@ export function Sidebar({
             <div className="flex-1 min-w-0">
               <p className="text-gray-700 text-sm font-medium truncate">{user.name}</p>
               <p className="text-gray-400 text-xs truncate">
-                {user.role === 'ADMIN' ? 'Administrador' : user.role === 'LEAD' ? 'Lead' : 'Team'}
+                {user.role === 'ADMIN' ? 'Administrador' : user.role === 'LEAD' ? 'Lead' : user.role === 'PARTNER' ? 'Socio comercial' : 'Team'}
                 {user.area ? ` · ${user.area}` : ''}
               </p>
             </div>

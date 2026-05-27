@@ -64,7 +64,7 @@ export function ProjectMetricsBlock({ metrics }: { metrics: ProjectMetrics }) {
       )}
 
       {/* Quick stats */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="bg-slate-50 rounded-xl p-3 text-center">
           <p className={`text-2xl font-bold ${metrics.tasksOverdue > 0 ? 'text-red-600' : 'text-slate-900'}`}>{metrics.tasksOverdue}</p>
           <p className="text-xs text-slate-500 mt-0.5">Atrasadas</p>

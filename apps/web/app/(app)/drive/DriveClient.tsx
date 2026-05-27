@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react'
+import { useState, useEffect, useCallback, useRef, createContext, useContext, useMemo } from 'react'
 import { api } from '@/lib/api'
 import {
   HardDrive, FolderOpen, Folder, ChevronRight, Search, X, ExternalLink,
   Image, FileText, Film, FileSpreadsheet, Presentation, File, RefreshCw,
   PlugZap, Link2Off, ArrowLeft, ZoomIn, Download, Upload, CheckSquare, Square,
   CheckCircle2, AlertCircle, Loader2, ChevronLeft, TriangleAlert, Trash2,
+  FolderPlus, Pencil, ArrowRight, SortAsc, SortDesc, ChevronDown,
 } from 'lucide-react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -45,14 +46,21 @@ interface ContextMenuState {
   y: number
 }
 
+type SortKey = 'name' | 'date' | 'size' | 'type'
+type SortDir = 'asc' | 'desc'
+
 // ── Context menu ──────────────────────────────────────────────────────────────
 
 interface ContextMenuActions {
   onPreview: (f: DriveFile) => void
   onDelete:  (f: DriveFile) => void
   onSelect:  (id: string)   => void
+  onRename:  (f: DriveFile) => void
+  onMove:    (f: DriveFile) => void
   isAdmin:   boolean
+  isAdminOrLead: boolean
   selected:  Set<string>
+  folders:   DriveFile[]  // current-level folders for move target
 }
 
 const CtxActions = createContext<ContextMenuActions | null>(null)
@@ -64,7 +72,6 @@ function ContextMenu({ menu, onClose }: { menu: ContextMenuState; onClose: () =>
   const folder = file.mimeType === FOLDER_MIME
   const isSelected = ctx.selected.has(file.id)
 
-  // Clamp to viewport
   const [pos, setPos] = useState({ x: menu.x, y: menu.y })
   useEffect(() => {
     if (!ref.current) return
@@ -121,6 +128,12 @@ function ContextMenu({ menu, onClose }: { menu: ContextMenuState; onClose: () =>
       {file.webViewLink && item(<ExternalLink className="w-4 h-4" />, 'Abrir en Drive', () => {
         window.open(file.webViewLink, '_blank', 'noopener,noreferrer')
       })}
+
+      {item(<Pencil className="w-4 h-4" />, 'Renombrar', () => ctx.onRename(file))}
+
+      {ctx.isAdminOrLead && ctx.folders.filter(f => f.id !== file.id).length > 0 && (
+        item(<ArrowRight className="w-4 h-4" />, 'Mover a…', () => ctx.onMove(file))
+      )}
 
       {!folder && (
         <>
@@ -185,10 +198,9 @@ function fmtDate(iso?: string) {
 // ── Preview modal ─────────────────────────────────────────────────────────────
 
 function stripRtf(raw: string) {
-  // Remove RTF control words, groups, and non-ASCII escape sequences
   return raw
-    .replace(/\{\\[\w-]+[^}]*\}/g, '')   // remove groups like {\fonttbl ...}
-    .replace(/\\[a-z]+\d*\s?/gi, '')      // remove control words like \rtf1 \par \b
+    .replace(/\{\\[\w-]+[^}]*\}/g, '')
+    .replace(/\\[a-z]+\d*\s?/gi, '')
     .replace(/\\\*/g, '')
     .replace(/[{}\\]/g, '')
     .replace(/\r\n|\r/g, '\n')
@@ -230,7 +242,9 @@ function PreviewModal({ file, files, onClose, onNav }: {
     return () => window.removeEventListener('keydown', onKey)
   }, [idx, hasPrev, hasNext, onClose, onNav, nonFolders])
 
-  const embedUrl = file.mimeType.startsWith('application/vnd.google-apps.')
+  // Determine embed URL — videos and Google Workspace files use Drive player
+  const isGoogleDoc = file.mimeType.startsWith('application/vnd.google-apps.')
+  const embedUrl = isGoogleDoc || isVideo(file)
     ? `https://drive.google.com/file/d/${file.id}/preview`
     : isImage(file) || isPdf(file)
     ? `/api/drive/files/${file.id}/thumbnail`
@@ -254,13 +268,15 @@ function PreviewModal({ file, files, onClose, onNav }: {
               <ExternalLink className="w-3.5 h-3.5" /> Abrir en Drive
             </a>
           )}
-          <a
-            href={`/api/drive/files/${file.id}/download`}
-            onClick={e => e.stopPropagation()}
-            className="flex items-center gap-1.5 text-xs text-white/70 hover:text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition"
-          >
-            <Download className="w-3.5 h-3.5" /> Descargar
-          </a>
+          {!isVideo(file) && !isGoogleDoc && (
+            <a
+              href={`/api/drive/files/${file.id}/download`}
+              onClick={e => e.stopPropagation()}
+              className="flex items-center gap-1.5 text-xs text-white/70 hover:text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition"
+            >
+              <Download className="w-3.5 h-3.5" /> Descargar
+            </a>
+          )}
           <button onClick={onClose} className="text-white/60 hover:text-white p-1.5 rounded-lg hover:bg-white/10 transition">
             <X className="w-5 h-5" />
           </button>
@@ -334,7 +350,11 @@ function FileCard({ file, onOpen, onPreview, selected, onToggleSelect, selectMod
 }) {
   const folder  = isFolder(file)
   const image   = isImage(file)
-  const thumbUrl = file.thumbnailLink ? file.thumbnailLink.replace('=s220', '=s400') : null
+  const thumbUrl = file.thumbnailLink
+    ? file.thumbnailLink.replace('=s220', '=s400')
+    : null
+  // Show thumbnail for any file type that has one (Google generates thumbs for PDFs, docs, etc.)
+  const showThumb = !folder && thumbUrl !== null
 
   function handleClick(e: React.MouseEvent) {
     if (!folder && (e.metaKey || e.ctrlKey || selectMode)) { onToggleSelect(); return }
@@ -364,8 +384,8 @@ function FileCard({ file, onOpen, onPreview, selected, onToggleSelect, selectMod
       )}
 
       <div className={`relative aspect-video flex items-center justify-center ${folder ? 'bg-amber-50' : 'bg-slate-50'}`}>
-        {image && thumbUrl
-          ? <img src={thumbUrl} alt={file.name} className="w-full h-full object-cover" />
+        {showThumb
+          ? <img src={thumbUrl!} alt={file.name} loading="lazy" className="w-full h-full object-cover" />
           : folder
           ? <Folder className="w-12 h-12 text-yellow-400" />
           : <FileIcon file={file} size={20} />
@@ -565,16 +585,200 @@ function DragOverlay() {
   )
 }
 
+// ── New Folder Modal ──────────────────────────────────────────────────────────
+
+function NewFolderModal({ onConfirm, onClose, saving }: {
+  onConfirm: (name: string) => void
+  onClose: () => void
+  saving: boolean
+}) {
+  const [name, setName] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { inputRef.current?.focus() }, [])
+  function submit(e: React.FormEvent) {
+    e.preventDefault()
+    if (name.trim()) onConfirm(name.trim())
+  }
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+        <h3 className="font-semibold text-slate-900 mb-4">Nueva carpeta</h3>
+        <form onSubmit={submit} className="space-y-4">
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Nombre de la carpeta"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#17394f]/30 focus:border-[#17394f]/50"
+          />
+          <div className="flex gap-3">
+            <button type="button" onClick={onClose}
+              className="flex-1 border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium rounded-xl py-2.5 transition">
+              Cancelar
+            </button>
+            <button type="submit" disabled={saving || !name.trim()}
+              className="flex-1 bg-[#17394f] hover:bg-[#17394f]/90 disabled:opacity-50 text-white text-sm font-medium rounded-xl py-2.5 transition">
+              {saving ? 'Creando…' : 'Crear'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── Rename Modal ──────────────────────────────────────────────────────────────
+
+function RenameModal({ file, onConfirm, onClose, saving }: {
+  file: DriveFile
+  onConfirm: (name: string) => void
+  onClose: () => void
+  saving: boolean
+}) {
+  const [name, setName] = useState(file.name)
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [])
+  function submit(e: React.FormEvent) {
+    e.preventDefault()
+    if (name.trim() && name.trim() !== file.name) onConfirm(name.trim())
+    else onClose()
+  }
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+        <h3 className="font-semibold text-slate-900 mb-4">Renombrar</h3>
+        <form onSubmit={submit} className="space-y-4">
+          <input
+            ref={inputRef}
+            type="text"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#17394f]/30 focus:border-[#17394f]/50"
+          />
+          <div className="flex gap-3">
+            <button type="button" onClick={onClose}
+              className="flex-1 border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium rounded-xl py-2.5 transition">
+              Cancelar
+            </button>
+            <button type="submit" disabled={saving || !name.trim()}
+              className="flex-1 bg-[#17394f] hover:bg-[#17394f]/90 disabled:opacity-50 text-white text-sm font-medium rounded-xl py-2.5 transition">
+              {saving ? 'Guardando…' : 'Guardar'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── Move Modal ────────────────────────────────────────────────────────────────
+
+function MoveModal({ file, folders, onConfirm, onClose, saving }: {
+  file: DriveFile
+  folders: DriveFile[]
+  onConfirm: (targetFolderId: string) => void
+  onClose: () => void
+  saving: boolean
+}) {
+  const targets = folders.filter(f => f.id !== file.id)
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+        <h3 className="font-semibold text-slate-900 mb-1">Mover "{file.name}"</h3>
+        <p className="text-xs text-slate-500 mb-4">Selecciona la carpeta destino</p>
+        <div className="space-y-1 max-h-60 overflow-y-auto mb-4">
+          {targets.map(f => (
+            <button key={f.id} onClick={() => onConfirm(f.id)} disabled={saving}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 transition text-left group">
+              <Folder className="w-4 h-4 text-yellow-500 shrink-0" />
+              <span className="text-sm text-slate-700 truncate">{f.name}</span>
+            </button>
+          ))}
+          {targets.length === 0 && (
+            <p className="text-sm text-slate-400 text-center py-4">No hay carpetas disponibles</p>
+          )}
+        </div>
+        <button type="button" onClick={onClose}
+          className="w-full border border-slate-200 text-slate-600 hover:bg-slate-50 text-sm font-medium rounded-xl py-2.5 transition">
+          Cancelar
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Sort dropdown ─────────────────────────────────────────────────────────────
+
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: 'name', label: 'Nombre' },
+  { key: 'date', label: 'Fecha' },
+  { key: 'size', label: 'Tamaño' },
+  { key: 'type', label: 'Tipo' },
+]
+
+function SortDropdown({ sortKey, sortDir, onChange }: {
+  sortKey: SortKey; sortDir: SortDir
+  onChange: (key: SortKey, dir: SortDir) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const current = SORT_OPTIONS.find(o => o.key === sortKey)!
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1.5 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50 transition"
+      >
+        {sortDir === 'asc' ? <SortAsc className="w-3.5 h-3.5" /> : <SortDesc className="w-3.5 h-3.5" />}
+        {current.label}
+        <ChevronDown className="w-3 h-3 text-slate-400" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute top-full mt-1 right-0 bg-white border border-slate-200 rounded-xl shadow-lg z-20 min-w-[140px] py-1 overflow-hidden">
+            {SORT_OPTIONS.map(opt => (
+              <button
+                key={opt.key}
+                onClick={() => {
+                  if (opt.key === sortKey) {
+                    onChange(sortKey, sortDir === 'asc' ? 'desc' : 'asc')
+                  } else {
+                    onChange(opt.key, 'asc')
+                  }
+                  setOpen(false)
+                }}
+                className={`w-full flex items-center justify-between px-3 py-2 text-sm text-left hover:bg-slate-50 transition
+                  ${opt.key === sortKey ? 'text-[#17394f] font-medium' : 'text-slate-700'}`}
+              >
+                {opt.label}
+                {opt.key === sortKey && (
+                  sortDir === 'asc' ? <SortAsc className="w-3.5 h-3.5" /> : <SortDesc className="w-3.5 h-3.5" />
+                )}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 type ViewMode = 'grid' | 'list'
 
-interface Props { isAdmin: boolean; initialStatus: DriveStatus }
+interface Props { isAdmin: boolean; isAdminOrLead: boolean; initialStatus: DriveStatus }
 
-export function DriveClient({ isAdmin, initialStatus }: Props) {
+export function DriveClient({ isAdmin, isAdminOrLead, initialStatus }: Props) {
   const [status, setStatus]               = useState(initialStatus)
   const [roots, setRoots]                 = useState<PinnedRoot[]>([])
   const [files, setFiles]                 = useState<DriveFile[]>([])
+  const [nextPageToken, setNextPageToken] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore]     = useState(false)
   const [loading, setLoading]             = useState(false)
   const [loadError, setLoadError]         = useState<string | null>(null)
   const [tokenExpired, setTokenExpired]   = useState(false)
@@ -587,12 +791,24 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
   const [searchResults, setSearchResults] = useState<DriveFile[] | null>(null)
   const [disconnecting, setDisconnecting] = useState(false)
 
+  // Sort
+  const [sortKey, setSortKey]             = useState<SortKey>('name')
+  const [sortDir, setSortDir]             = useState<SortDir>('asc')
+
   // Multi-select
   const [selected, setSelected]           = useState<Set<string>>(new Set())
   const [downloading, setDownloading]     = useState(false)
 
   // Context menu
   const [ctxMenu, setCtxMenu]             = useState<ContextMenuState | null>(null)
+
+  // Modals
+  const [showNewFolder, setShowNewFolder]   = useState(false)
+  const [newFolderSaving, setNewFolderSaving] = useState(false)
+  const [renameFile, setRenameFile]         = useState<DriveFile | null>(null)
+  const [renameSaving, setRenameSaving]     = useState(false)
+  const [moveFile, setMoveFile]             = useState<DriveFile | null>(null)
+  const [moveSaving, setMoveSaving]         = useState(false)
 
   // Upload
   const [uploading, setUploading]         = useState(false)
@@ -605,7 +821,26 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
   const dropZoneRef                       = useRef<HTMLDivElement>(null)
   const autoRefreshRef                    = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const AUTO_REFRESH_MS = 30_000
+  const AUTO_REFRESH_MS = 60_000 // 60s — reduced from 30s to halve Google API calls
+
+  // ── Sorted display files ────────────────────────────────────────────────────
+  const sortedFiles = useMemo(() => {
+    const base = [...(searchResults ?? files)]
+    base.sort((a, b) => {
+      // Folders always first regardless of sort
+      if (isFolder(a) !== isFolder(b)) return isFolder(a) ? -1 : 1
+      let cmp = 0
+      if (sortKey === 'name') cmp = a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })
+      else if (sortKey === 'date') cmp = (a.modifiedTime ?? '').localeCompare(b.modifiedTime ?? '')
+      else if (sortKey === 'size') cmp = parseInt(a.size ?? '0') - parseInt(b.size ?? '0')
+      else if (sortKey === 'type') cmp = a.mimeType.localeCompare(b.mimeType)
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+    return base
+  }, [files, searchResults, sortKey, sortDir])
+
+  const displayFolders   = useMemo(() => sortedFiles.filter(isFolder), [sortedFiles])
+  const displayNonFolders = useMemo(() => sortedFiles.filter(f => !isFolder(f)), [sortedFiles])
 
   const loadFolder = useCallback(async (id: string, root: PinnedRoot) => {
     setLoading(true)
@@ -613,9 +848,11 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
     setSearchResults(null)
     setSearch('')
     setSelected(new Set())
+    setNextPageToken(null)
     try {
-      const data = await api.get<DriveFile[]>(`/api/drive/files?folderId=${id}`)
-      setFiles(data)
+      const data = await api.get<{ files: DriveFile[]; nextPageToken: string | null }>(`/api/drive/files?folderId=${id}`)
+      setFiles(data.files)
+      setNextPageToken(data.nextPageToken ?? null)
       setFolderId(id)
       setCurrentRoot(root)
       if (id === root.id) {
@@ -636,6 +873,20 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
       setLoading(false)
     }
   }, [])
+
+  async function loadMore() {
+    if (!folderId || !nextPageToken || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const data = await api.get<{ files: DriveFile[]; nextPageToken: string | null }>(
+        `/api/drive/files?folderId=${folderId}&pageToken=${encodeURIComponent(nextPageToken)}`
+      )
+      setFiles(prev => [...prev, ...data.files])
+      setNextPageToken(data.nextPageToken ?? null)
+    } catch { /* ignore */ } finally {
+      setLoadingMore(false)
+    }
+  }
 
   useEffect(() => {
     if (status.connected) {
@@ -734,11 +985,11 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
 
   async function downloadSelected() {
     if (selected.size === 0) return
+    if (selected.size > 50) { alert('Máximo 50 archivos por descarga ZIP.'); return }
     setDownloading(true)
     try {
       const ids = Array.from(selected)
       if (ids.length === 1) {
-        // Single file — direct download
         const file = (searchResults ?? files).find(f => f.id === ids[0])
         const a = document.createElement('a')
         a.href = `/api/drive/files/${ids[0]}/download`
@@ -747,14 +998,16 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
         a.click()
         document.body.removeChild(a)
       } else {
-        // Multiple files — ZIP
         const res = await fetch('/api/drive/files/zip', {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ids }),
         })
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.error ?? `HTTP ${res.status}`)
+        }
         const blob = await res.blob()
         const url  = URL.createObjectURL(blob)
         const a    = document.createElement('a')
@@ -765,9 +1018,57 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
         document.body.removeChild(a)
         URL.revokeObjectURL(url)
       }
+    } catch (err: any) {
+      alert(err?.message ?? 'Error al descargar.')
     } finally {
       setDownloading(false)
       clearSelection()
+    }
+  }
+
+  // ── Create folder ───────────────────────────────────────────────────────────
+  async function handleCreateFolder(name: string) {
+    if (!folderId) return
+    setNewFolderSaving(true)
+    try {
+      const folder = await api.post<DriveFile>('/api/drive/folders', { name, parentId: folderId })
+      setFiles(prev => [folder, ...prev])
+      setShowNewFolder(false)
+    } catch {
+      alert('No se pudo crear la carpeta.')
+    } finally {
+      setNewFolderSaving(false)
+    }
+  }
+
+  // ── Rename ──────────────────────────────────────────────────────────────────
+  async function handleRename(file: DriveFile, newName: string) {
+    setRenameSaving(true)
+    try {
+      const updated = await api.patch<DriveFile>(`/api/drive/files/${file.id}`, { name: newName })
+      setFiles(prev => prev.map(f => f.id === updated.id ? { ...f, name: updated.name } : f))
+      if (searchResults) setSearchResults(prev => prev!.map(f => f.id === updated.id ? { ...f, name: updated.name } : f))
+      setRenameFile(null)
+    } catch {
+      alert('No se pudo renombrar.')
+    } finally {
+      setRenameSaving(false)
+    }
+  }
+
+  // ── Move ────────────────────────────────────────────────────────────────────
+  async function handleMove(file: DriveFile, targetFolderId: string) {
+    setMoveSaving(true)
+    try {
+      await api.post(`/api/drive/files/${file.id}/move`, { targetFolderId })
+      // Remove from current view — it moved elsewhere
+      setFiles(prev => prev.filter(f => f.id !== file.id))
+      if (searchResults) setSearchResults(prev => prev!.filter(f => f.id !== file.id))
+      setMoveFile(null)
+    } catch {
+      alert('No se pudo mover el archivo.')
+    } finally {
+      setMoveSaving(false)
     }
   }
 
@@ -802,11 +1103,12 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
     }
   }
 
-  // Silent background refresh — no loading spinner, no clearing selection
-  const silentRefresh = useCallback(async (id: string, root: PinnedRoot) => {
+  // Silent background refresh
+  const silentRefresh = useCallback(async (id: string) => {
     try {
-      const data = await api.get<DriveFile[]>(`/api/drive/files?folderId=${id}`)
-      setFiles(data)
+      const data = await api.get<{ files: DriveFile[]; nextPageToken: string | null }>(`/api/drive/files?folderId=${id}`)
+      setFiles(data.files)
+      setNextPageToken(data.nextPageToken ?? null)
     } catch { /* ignore background errors */ }
   }, [])
 
@@ -814,10 +1116,16 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
     if (autoRefreshRef.current) clearInterval(autoRefreshRef.current)
     if (!folderId || !currentRoot || searchResults) return
     autoRefreshRef.current = setInterval(() => {
-      silentRefresh(folderId, currentRoot)
+      silentRefresh(folderId)
     }, AUTO_REFRESH_MS)
     return () => { if (autoRefreshRef.current) clearInterval(autoRefreshRef.current) }
   }, [folderId, currentRoot, searchResults, silentRefresh])
+
+  // Open a folder — works from both folder view and home search results
+  function openFolder(f: DriveFile) {
+    const root = currentRoot ?? roots[0] ?? { id: 'root', name: 'Drive', label: 'Drive', isSharedDrive: false }
+    loadFolder(f.id, root)
+  }
 
   function openCtxMenu(file: DriveFile, e: React.MouseEvent) {
     e.preventDefault()
@@ -835,18 +1143,19 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
   if (tokenExpired) return <TokenExpired isAdmin={isAdmin} />
   if (!status.connected) return <NotConnected isAdmin={isAdmin} />
 
-  const displayFiles  = searchResults ?? files
-  const folders       = displayFiles.filter(isFolder)
-  const nonFolders    = displayFiles.filter(f => !isFolder(f))
-  const selectMode    = selected.size > 0
-  const allSelected   = nonFolders.length > 0 && nonFolders.every(f => selected.has(f.id))
+  const selectMode  = selected.size > 0
+  const allSelected = displayNonFolders.length > 0 && displayNonFolders.every(f => selected.has(f.id))
 
   const ctxActions: ContextMenuActions = {
     onPreview: setPreview,
     onDelete:  deleteSingle,
     onSelect:  toggleSelect,
+    onRename:  (f) => setRenameFile(f),
+    onMove:    (f) => setMoveFile(f),
     isAdmin,
+    isAdminOrLead,
     selected,
+    folders: files.filter(isFolder),
   }
 
   return (
@@ -890,6 +1199,13 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
               <>
                 <input ref={fileInputRef} type="file" multiple className="hidden" onChange={e => handleUpload(e.target.files)} />
                 <button
+                  onClick={() => setShowNewFolder(true)}
+                  className="flex items-center gap-1.5 text-xs font-medium text-slate-600 border border-slate-200 px-3 py-2 rounded-xl hover:bg-slate-50 transition"
+                  title="Nueva carpeta"
+                >
+                  <FolderPlus className="w-3.5 h-3.5" /> Nueva carpeta
+                </button>
+                <button
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading}
                   className="flex items-center gap-1.5 text-xs font-medium text-[#17394f] border border-[#17394f]/30 px-3 py-2 rounded-xl hover:bg-[#17394f]/5 transition disabled:opacity-50"
@@ -918,23 +1234,21 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
           </div>
         </div>
 
-        {/* Search */}
-        {folderId && (
-          <div className="relative mb-3 shrink-0">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input
-              type="text" value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Buscar archivos en Drive…"
-              className="w-full border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#17394f]/30"
-            />
-            {search && (
-              <button onClick={() => { setSearch(''); setSearchResults(null) }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        )}
+        {/* Search — always visible when connected */}
+        <div className="relative mb-3 shrink-0">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input
+            type="text" value={search} onChange={e => setSearch(e.target.value)}
+            placeholder={folderId ? 'Buscar archivos en Drive…' : 'Buscar en todo Drive…'}
+            className="w-full border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#17394f]/30"
+          />
+          {search && (
+            <button onClick={() => { setSearch(''); setSearchResults(null) }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
 
         {/* Breadcrumb */}
         {folderId && !searchResults && (
@@ -959,11 +1273,11 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
           </div>
         )}
 
-        {folderId && searchResults && (
+        {searchResults && (
           <div className="flex items-center gap-2 mb-3 shrink-0">
             <button onClick={() => { setSearch(''); setSearchResults(null) }}
               className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition">
-              <ArrowLeft className="w-4 h-4" /> Volver
+              <ArrowLeft className="w-4 h-4" /> {folderId ? 'Volver' : 'Inicio'}
             </button>
             <span className="text-sm text-slate-400">
               {searchResults.length} resultado{searchResults.length !== 1 ? 's' : ''} para "<strong>{search}</strong>"
@@ -971,12 +1285,19 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
           </div>
         )}
 
-        {/* Toolbar: count + select all + view toggle */}
-        {folderId && (
+        {/* Toolbar: count + select all + sort + view toggle */}
+        {(folderId || searchResults) && (
           <div className="flex items-center justify-between mb-3 shrink-0 gap-2 flex-wrap">
             <div className="flex items-center gap-3">
-              <span className="text-xs text-slate-400">{displayFiles.length} elemento{displayFiles.length !== 1 ? 's' : ''}</span>
-              {nonFolders.length > 0 && (
+              <span className="text-xs text-slate-400">
+                {sortedFiles.length} elemento{sortedFiles.length !== 1 ? 's' : ''}
+                {displayFolders.length > 0 && displayNonFolders.length > 0 && (
+                  <span className="ml-1 text-slate-300">
+                    ({displayFolders.length} carp. · {displayNonFolders.length} arch.)
+                  </span>
+                )}
+              </span>
+              {displayNonFolders.length > 0 && (
                 <button
                   onClick={toggleSelectAll}
                   className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-[#17394f] transition"
@@ -988,16 +1309,23 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
                 </button>
               )}
             </div>
-            <div className="flex border border-slate-200 rounded-lg overflow-hidden">
-              {(['grid', 'list'] as ViewMode[]).map(m => (
-                <button
-                  key={m}
-                  onClick={() => setViewMode(m)}
-                  className={`px-3 py-1.5 text-xs font-medium transition ${viewMode === m ? 'bg-[#17394f] text-white' : 'text-slate-500 hover:bg-slate-50'}`}
-                >
-                  {m === 'grid' ? '⊞ Cuadrícula' : '≡ Lista'}
-                </button>
-              ))}
+            <div className="flex items-center gap-2">
+              <SortDropdown
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onChange={(k, d) => { setSortKey(k); setSortDir(d) }}
+              />
+              <div className="flex border border-slate-200 rounded-lg overflow-hidden">
+                {(['grid', 'list'] as ViewMode[]).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => setViewMode(m)}
+                    className={`px-3 py-1.5 text-xs font-medium transition ${viewMode === m ? 'bg-[#17394f] text-white' : 'text-slate-500 hover:bg-slate-50'}`}
+                  >
+                    {m === 'grid' ? '⊞ Cuadrícula' : '≡ Lista'}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -1005,7 +1333,7 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
         {/* File area */}
         <div className="flex-1 overflow-y-auto min-h-0">
           {/* Home */}
-          {!folderId && !loading && (
+          {!folderId && !loading && !searchResults && (
             <div className="space-y-2">
               {roots.map(root => (
                 <button
@@ -1051,7 +1379,7 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
           )}
 
           {/* Empty */}
-          {!loading && !loadError && folderId && displayFiles.length === 0 && (
+          {!loading && !loadError && (folderId || searchResults) && sortedFiles.length === 0 && (
             <div className="text-center py-16 text-slate-400">
               <Folder className="w-10 h-10 mx-auto mb-3 opacity-30" />
               <p className="text-sm">{searchResults ? 'Sin resultados' : 'Carpeta vacía'}</p>
@@ -1062,15 +1390,17 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
           )}
 
           {/* Grid */}
-          {!loading && !loadError && folderId && displayFiles.length > 0 && viewMode === 'grid' && (
+          {!loading && !loadError && (folderId || searchResults) && sortedFiles.length > 0 && viewMode === 'grid' && (
             <>
-              {folders.length > 0 && (
+              {displayFolders.length > 0 && (
                 <div className="mb-4">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Carpetas</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">
+                    Carpetas <span className="opacity-60 font-normal normal-case tracking-normal">{displayFolders.length}</span>
+                  </p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                    {folders.map(f => (
+                    {displayFolders.map(f => (
                       <FileCard key={f.id} file={f}
-                        onOpen={() => currentRoot && loadFolder(f.id, currentRoot)}
+                        onOpen={() => openFolder(f)}
                         onPreview={() => setPreview(f)}
                         selected={selected.has(f.id)} onToggleSelect={() => toggleSelect(f.id)} selectMode={selectMode}
                         isAdmin={isAdmin} onDelete={() => deleteSingle(f)}
@@ -1079,13 +1409,15 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
                   </div>
                 </div>
               )}
-              {nonFolders.length > 0 && (
+              {displayNonFolders.length > 0 && (
                 <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Archivos</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">
+                    Archivos <span className="opacity-60 font-normal normal-case tracking-normal">{displayNonFolders.length}</span>
+                  </p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                    {nonFolders.map(f => (
+                    {displayNonFolders.map(f => (
                       <FileCard key={f.id} file={f}
-                        onOpen={() => currentRoot && loadFolder(f.id, currentRoot)}
+                        onOpen={() => openFolder(f)}
                         onPreview={() => setPreview(f)}
                         selected={selected.has(f.id)} onToggleSelect={() => toggleSelect(f.id)} selectMode={selectMode}
                         isAdmin={isAdmin} onDelete={() => deleteSingle(f)}
@@ -1098,7 +1430,7 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
           )}
 
           {/* List */}
-          {!loading && !loadError && folderId && displayFiles.length > 0 && viewMode === 'list' && (
+          {!loading && !loadError && (folderId || searchResults) && sortedFiles.length > 0 && viewMode === 'list' && (
             <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
               <div className="flex items-center gap-3 px-4 py-2 border-b border-slate-100 bg-slate-50">
                 <span className="w-4 shrink-0" />
@@ -1108,14 +1440,28 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider w-28 text-right hidden sm:block">Modificado</span>
                 <span className="w-24 shrink-0" />
               </div>
-              {displayFiles.map(f => (
+              {sortedFiles.map(f => (
                 <FileRow key={f.id} file={f}
-                  onOpen={() => currentRoot && loadFolder(f.id, currentRoot)}
+                  onOpen={() => openFolder(f)}
                   onPreview={() => setPreview(f)}
                   selected={selected.has(f.id)} onToggleSelect={() => toggleSelect(f.id)} selectMode={selectMode}
                   isAdmin={isAdmin} onDelete={() => deleteSingle(f)}
                   onContextMenu={e => openCtxMenu(f, e)} />
               ))}
+            </div>
+          )}
+
+          {/* Load more — only inside a folder, not search results */}
+          {!loading && !loadError && folderId && nextPageToken && !searchResults && (
+            <div className="flex justify-center mt-4">
+              <button
+                onClick={loadMore}
+                disabled={loadingMore}
+                className="flex items-center gap-2 text-sm text-[#17394f] font-medium border border-[#17394f]/30 px-4 py-2 rounded-xl hover:bg-[#17394f]/5 transition disabled:opacity-50"
+              >
+                {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChevronDown className="w-4 h-4" />}
+                {loadingMore ? 'Cargando…' : 'Cargar más'}
+              </button>
             </div>
           )}
         </div>
@@ -1160,6 +1506,30 @@ export function DriveClient({ isAdmin, initialStatus }: Props) {
       )}
       {uploadToast && <UploadToast state={uploadToast.state} label={uploadToast.label} />}
       {ctxMenu && <ContextMenu menu={ctxMenu} onClose={() => setCtxMenu(null)} />}
+      {showNewFolder && (
+        <NewFolderModal
+          onConfirm={handleCreateFolder}
+          onClose={() => setShowNewFolder(false)}
+          saving={newFolderSaving}
+        />
+      )}
+      {renameFile && (
+        <RenameModal
+          file={renameFile}
+          onConfirm={(name) => handleRename(renameFile, name)}
+          onClose={() => setRenameFile(null)}
+          saving={renameSaving}
+        />
+      )}
+      {moveFile && (
+        <MoveModal
+          file={moveFile}
+          folders={files.filter(isFolder)}
+          onConfirm={(targetId) => handleMove(moveFile, targetId)}
+          onClose={() => setMoveFile(null)}
+          saving={moveSaving}
+        />
+      )}
     </>
     </CtxActions.Provider>
   )

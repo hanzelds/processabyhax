@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { DocBlock as DocBlockType, DocBlockType as BlockType } from '@/types'
+import { DocBlock as DocBlockType, DocBlockType as BlockType, User } from '@/types'
 import { TextBlock } from './blocks/TextBlock'
 import { ListBlock } from './blocks/ListBlock'
 import { CalloutBlock } from './blocks/CalloutBlock'
@@ -10,11 +10,14 @@ import { ImageBlock } from './blocks/ImageBlock'
 import { ChildPageBlock } from './blocks/ChildPageBlock'
 import { BlockOptions } from './BlockOptions'
 import { GripVertical, MoreHorizontal } from 'lucide-react'
+import { useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 interface Props {
   block: DocBlockType
   focused: boolean
   readOnly: boolean
+  users?: User[]
   blockRef: (el: HTMLElement | null) => void
   onUpdate: (id: string, content: Partial<DocBlockType['content']>) => void
   onUpdateHtml: (id: string, html: string) => void
@@ -33,7 +36,7 @@ interface Props {
 }
 
 export function DocBlockRenderer({
-  block, focused, readOnly, blockRef,
+  block, focused, readOnly, users = [], blockRef,
   onUpdate, onUpdateHtml, onEnter, onBackspaceEmpty, onFocus,
   onArrowUp, onArrowDown, onSlash, onSlashClose,
   onMoveUp, onMoveDown, onDelete, onDuplicate, onConvert,
@@ -41,6 +44,9 @@ export function DocBlockRenderer({
   const [hovered, setHovered] = useState(false)
   const [showOptions, setShowOptions] = useState(false)
   const optsBtnRef = useRef<HTMLButtonElement>(null)
+
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: block.id })
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }
 
   function getOptionsPosition() {
     const btn = optsBtnRef.current
@@ -53,6 +59,8 @@ export function DocBlockRenderer({
 
   return (
     <div
+      ref={setNodeRef}
+      style={style}
       className="group/block relative"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false) }}
@@ -60,7 +68,11 @@ export function DocBlockRenderer({
       {/* Sidebar controls */}
       {!readOnly && !isDivider && (
         <div className={`absolute -left-14 top-0.5 flex items-center gap-0.5 transition-opacity ${hovered || focused ? 'opacity-100' : 'opacity-0'}`}>
-          <button className="w-6 h-6 flex items-center justify-center text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing">
+          <button
+            className="w-6 h-6 flex items-center justify-center text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing"
+            {...attributes}
+            {...listeners}
+          >
             <GripVertical className="w-3.5 h-3.5" />
           </button>
           <button
@@ -127,6 +139,7 @@ export function DocBlockRenderer({
           block={block}
           focused={focused}
           readOnly={readOnly}
+          users={users}
           blockRef={blockRef}
           onUpdate={html => onUpdateHtml(block.id, html)}
           onEnter={() => onEnter(block.id)}

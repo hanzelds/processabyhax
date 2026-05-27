@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Project } from '@/types'
+import { Project, Role } from '@/types'
 import { PROJECT_STATUS_LABEL, PROJECT_STATUS_COLOR, formatDate } from '@/lib/utils'
 import { ProjectCard } from '@/components/projects/ProjectCard'
 
@@ -7,9 +7,11 @@ interface Props {
   clientId: string
   projects: Project[]
   isAdmin: boolean
+  userRole?: Role
 }
 
-export function ClientProjectsTab({ clientId, projects, isAdmin }: Props) {
+export function ClientProjectsTab({ clientId, projects, isAdmin, userRole }: Props) {
+  const canCreate = isAdmin || userRole === 'LEAD'
   const active    = projects.filter(p => p.status !== 'COMPLETED')
   const completed = projects.filter(p => p.status === 'COMPLETED')
 
@@ -21,7 +23,7 @@ export function ClientProjectsTab({ clientId, projects, isAdmin }: Props) {
           <h3 className="text-sm font-semibold text-slate-600 uppercase tracking-wider">
             Proyectos activos ({active.length})
           </h3>
-          {isAdmin && (
+          {canCreate && (
             <Link href={`/projects?client=${clientId}`} className="text-xs font-medium text-brand-700 hover:text-brand-800 transition-colors">
               + Nuevo proyecto
             </Link>

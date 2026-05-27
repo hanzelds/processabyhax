@@ -31,7 +31,8 @@ export default async function CalendarPage({ searchParams }: PageProps) {
   const clients = await serverFetch<Client[]>('/api/clients') ?? []
   const params = await searchParams
   const selectedClientId = params.clientId ?? ''
-  const selectedClient = clients.find(c => c.id === selectedClientId)
+  const socialClients = clients.filter(c => c.socialMedia)
+  const selectedClient = socialClients.find(c => c.id === selectedClientId)
 
   // No client selected → show selector
   if (!selectedClient) {
@@ -41,7 +42,7 @@ export default async function CalendarPage({ searchParams }: PageProps) {
           <h1 className="text-xl font-bold text-slate-900">Calendario de contenido</h1>
           <p className="text-sm text-slate-500 mt-0.5">Programación y seguimiento de publicaciones</p>
         </div>
-        <ClientSelector clients={clients} returnPath="/content/calendar" />
+        <ClientSelector clients={socialClients} returnPath="/content/calendar" />
       </div>
     )
   }

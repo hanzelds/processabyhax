@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { prisma } from '../lib/prisma'
-import { isAuth, isAdminOrLead } from '../middleware/auth'
+import { isAuth, isAdminOrLead, requirePermission } from '../middleware/auth'
 import { ContentPieceStatus, CopyStatus, ContentType } from '@prisma/client'
 import { sendPieceScheduledEmail, sendPiecePublishedEmail } from '../lib/email'
 
@@ -100,7 +100,7 @@ contentCalendarRouter.get('/pieces/:id', isAuth, async (req, res) => {
 })
 
 // ── POST /pieces — create piece directly ──────────────────────────────────────
-contentCalendarRouter.post('/pieces', isAdminOrLead, async (req, res) => {
+contentCalendarRouter.post('/pieces', requirePermission('content.write'), async (req, res) => {
   const { title, clientId, type, platforms, copy, hashtags, referencesUrls,
           copyStatus, publicationNotes, scheduledDate, scheduledTime } = req.body
 
@@ -133,7 +133,7 @@ contentCalendarRouter.post('/pieces', isAdminOrLead, async (req, res) => {
 })
 
 // ── PATCH /pieces/:id — edit piece ────────────────────────────────────────────
-contentCalendarRouter.patch('/pieces/:id', isAdminOrLead, async (req, res) => {
+contentCalendarRouter.patch('/pieces/:id', requirePermission('content.write'), async (req, res) => {
   const { title, copy, hashtags, referencesUrls, copyStatus, publicationNotes } = req.body
   const data: Record<string, unknown> = {}
 
@@ -159,7 +159,7 @@ contentCalendarRouter.patch('/pieces/:id', isAdminOrLead, async (req, res) => {
 })
 
 // ── PATCH /pieces/:id/schedule ────────────────────────────────────────────────
-contentCalendarRouter.patch('/pieces/:id/schedule', isAdminOrLead, async (req, res) => {
+contentCalendarRouter.patch('/pieces/:id/schedule', requirePermission('content.write'), async (req, res) => {
   const { scheduledDate, scheduledTime } = req.body
 
   const prev = await prisma.contentPiece.findUnique({
@@ -201,7 +201,7 @@ contentCalendarRouter.patch('/pieces/:id/schedule', isAdminOrLead, async (req, r
 })
 
 // ── PATCH /pieces/:id/status ──────────────────────────────────────────────────
-contentCalendarRouter.patch('/pieces/:id/status', isAdminOrLead, async (req, res) => {
+contentCalendarRouter.patch('/pieces/:id/status', requirePermission('content.write'), async (req, res) => {
   const { status } = req.body
   if (!status) { res.status(400).json({ error: 'Status requerido' }); return }
 
@@ -228,7 +228,7 @@ contentCalendarRouter.patch('/pieces/:id/status', isAdminOrLead, async (req, res
 })
 
 // ── PATCH /pieces/:id/publish ─────────────────────────────────────────────────
-contentCalendarRouter.patch('/pieces/:id/publish', isAdminOrLead, async (req, res) => {
+contentCalendarRouter.patch('/pieces/:id/publish', requirePermission('content.write'), async (req, res) => {
   const prev = await prisma.contentPiece.findUnique({
     where: { id: req.params.id },
     select: { status: true, title: true, client: { select: { name: true } } },
@@ -256,7 +256,7 @@ contentCalendarRouter.patch('/pieces/:id/publish', isAdminOrLead, async (req, re
 })
 
 // ── DELETE /pieces/:id ────────────────────────────────────────────────────────
-contentCalendarRouter.delete('/pieces/:id', isAdminOrLead, async (req, res) => {
+contentCalendarRouter.delete('/pieces/:id', requirePermission('content.write'), async (req, res) => {
   try {
     const piece = await prisma.contentPiece.findUnique({
       where: { id: req.params.id },

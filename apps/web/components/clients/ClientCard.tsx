@@ -32,6 +32,11 @@ export function ClientCard({ client }: { client: Client }) {
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${CLIENT_TIER_COLOR[client.tier]}`}>
               {CLIENT_TIER_LABEL[client.tier]}
             </span>
+            {client.commercialPartner && (
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium shrink-0 bg-amber-50 text-amber-700 border border-amber-200">
+                Socio
+              </span>
+            )}
           </div>
           {client.industry && <p className="text-xs text-slate-400 mb-1">{client.industry}</p>}
           {client.primaryContact && (

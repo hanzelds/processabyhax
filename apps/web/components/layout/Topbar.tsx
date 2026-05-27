@@ -5,14 +5,19 @@ import { ChevronRight, Menu } from 'lucide-react'
 import { useSidebarStore } from '@/store/sidebarStore'
 import { User } from '@/types'
 import { cn } from '@/lib/utils'
+import { NotificationBell } from './NotificationBell'
+import { TimerWidget } from './TimerWidget'
 
 const PAGE_LABELS: Record<string, { label: string; section?: string }> = {
-  '/dashboard':    { label: 'Mis tareas',           section: 'Principal' },
-  '/projects':     { label: 'Proyectos',             section: 'Principal' },
-  '/clients':      { label: 'Clientes',              section: 'Clientes' },
-  '/admin/users':  { label: 'Equipo',                section: 'Administración' },
-  '/admin/tasks':  { label: 'Tareas administrativas',section: 'Administración' },
-  '/profile':      { label: 'Mi perfil',             section: 'Cuenta' },
+  '/dashboard':       { label: 'Mis tareas',           section: 'Principal' },
+  '/projects':        { label: 'Proyectos',             section: 'Principal' },
+  '/logistica':       { label: 'Logística',             section: 'Principal' },
+  '/clients':         { label: 'Clientes',              section: 'Clientes' },
+  '/admin/users':     { label: 'Equipo',                section: 'Administración' },
+  '/admin/tasks':     { label: 'Tareas administrativas',section: 'Administración' },
+  '/admin/reports':   { label: 'Reportes',              section: 'Administración' },
+  '/admin/day':       { label: 'Mi Día',               section: 'Administración' },
+  '/profile':         { label: 'Mi perfil',             section: 'Cuenta' },
 }
 
 function getBreadcrumb(pathname: string) {
@@ -82,6 +87,12 @@ export function Topbar({ user, sidebarCollapsed }: TopbarProps) {
           {today}
         </span>
 
+        {/* Timer widget */}
+        <TimerWidget />
+
+        {/* Notification bell */}
+        <NotificationBell />
+
         {/* User */}
         <div className="flex items-center gap-2.5 pl-3 border-l border-gray-100 shrink-0">
           <div
@@ -100,7 +111,7 @@ export function Topbar({ user, sidebarCollapsed }: TopbarProps) {
               {user.name.split(' ')[0]}
             </p>
             <p className="text-gray-400 text-xs truncate">
-              {user.role === 'ADMIN' ? 'Admin' : user.role === 'LEAD' ? 'Lead' : 'Team'}
+              {user.role === 'ADMIN' ? 'Admin' : user.role === 'LEAD' ? 'Lead' : user.role === 'PARTNER' ? 'Socio' : 'Team'}
               {user.area ? ` · ${user.area}` : ''}
             </p>
           </div>

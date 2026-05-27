@@ -171,11 +171,7 @@ portalRouter.get('/:token', async (req, res) => {
     prisma.contentPiece.findMany({
       where: {
         clientId,
-        OR: [
-          { scheduledDate: { gte: monthStart, lte: monthEnd } },
-          { scheduledDate: null, createdAt: { gte: monthStart, lte: monthEnd } },
-        ],
-        status: { notIn: ['cancelado'] },
+        status: 'en_revision',
       },
       orderBy: [{ scheduledDate: 'asc' }, { createdAt: 'asc' }],
       select: {
@@ -191,6 +187,11 @@ portalRouter.get('/:token', async (req, res) => {
               orderBy: { createdAt: 'asc' },
               take: 1,
             },
+            scripts: {
+              select: { id: true, title: true, status: true, type: true, content: true },
+              where: { status: { not: 'archivado' } },
+              orderBy: { createdAt: 'asc' as const },
+            },
           },
         },
       },
@@ -205,6 +206,11 @@ portalRouter.get('/:token', async (req, res) => {
         files: {
           select: { id: true, originalName: true, mimeType: true, sizeBytes: true, label: true, createdAt: true },
           orderBy: { createdAt: 'asc' },
+        },
+        scripts: {
+          select: { id: true, title: true, status: true, type: true, content: true },
+          where: { status: { not: 'archivado' } },
+          orderBy: { createdAt: 'asc' as const },
         },
       },
     }),
@@ -236,6 +242,7 @@ portalRouter.get('/:token', async (req, res) => {
     ...p,
     scheduledDate: p.scheduledDate ? p.scheduledDate.toISOString().split('T')[0] : null,
     coverImageFileId: p.brief?.files?.[0]?.id ?? null,
+    scripts: p.brief?.scripts ?? [],
     brief: undefined,
     portalApproval: pieceApprovalMap[p.id] ?? null,
   }))
@@ -359,7 +366,11 @@ portalRouter.post('/:token/approve-brief/:briefId', async (req, res) => {
 
   const brief = await prisma.contentBrief.findFirst({
     where: { id: briefId, clientId: tokenRow.clientId },
-    select: { id: true, title: true },
+    select: {
+      id: true, title: true,
+      _count: { select: { files: true } },
+      scripts: { select: { id: true }, where: { status: { not: 'archivado' } } },
+    },
   })
   if (!brief) return res.status(404).json({ error: 'Brief no encontrado' })
 
@@ -372,11 +383,22 @@ portalRouter.post('/:token/approve-brief/:briefId', async (req, res) => {
     },
   })
 
-  // Auto-advance brief status
-  await prisma.contentBrief.update({
-    where: { id: briefId },
-    data: { status: 'aprobado' },
-  })
+  // If brief has attached files → entregado, otherwise → en_produccion
+  const nextStatus = brief._count.files > 0 ? 'entregado' : 'en_produccion'
+
+  // Approve brief + all linked scripts in one transaction
+  await prisma.$transaction([
+    prisma.contentBrief.update({
+      where: { id: briefId },
+      data: { status: nextStatus },
+    }),
+    ...(brief.scripts.length > 0 ? [
+      prisma.script.updateMany({
+        where: { id: { in: brief.scripts.map(s => s.id) } },
+        data: { status: 'aprobado' },
+      }),
+    ] : []),
+  ])
 
   const appUrl = process.env.APP_URL || 'https://processa.hax.com.do'
   const adminEmails = await getAdminEmails()
@@ -464,11 +486,11 @@ portalRouter.post('/:token/changes-brief/:briefId', async (req, res) => {
     },
   })
 
-  // Move brief back to en_desarrollo + save note
+  // Move brief back to revision_interna + save note
   await prisma.contentBrief.update({
     where: { id: briefId },
     data: {
-      status: 'en_desarrollo',
+      status: 'revision_interna',
       clientApprovalNotes: feedback || null,
     },
   })

@@ -31,6 +31,18 @@ export function ProjectCard({ project }: { project: Project }) {
             </span>
           </div>
           <p className="text-slate-400 text-xs truncate">{project.client?.name}</p>
+          {project.clientService && (
+            <span
+              className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-md font-medium mt-0.5"
+              style={{
+                backgroundColor: project.clientService.service.color ? `${project.clientService.service.color}18` : '#f1f5f9',
+                color: project.clientService.service.color || '#64748b',
+              }}
+            >
+              {project.clientService.service.icon && <span>{project.clientService.service.icon}</span>}
+              {project.clientService.name || project.clientService.service.name}
+            </span>
+          )}
         </div>
         <div className="text-right shrink-0">
           <p className={`text-xs font-medium ${dl.cls}`}>{dl.label}</p>

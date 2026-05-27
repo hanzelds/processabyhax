@@ -42,7 +42,7 @@ export function UserPermissionsTab({ userId }: Props) {
           <div className="px-5 py-3 bg-slate-50 border-b border-slate-100">
             <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{mod}</h4>
           </div>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto"><table className="w-full min-w-[480px] text-sm">
             <thead>
               <tr className="border-b border-slate-100">
                 <th className="text-left px-5 py-2 text-xs text-slate-400 font-medium">Permiso</th>
@@ -86,7 +86,7 @@ export function UserPermissionsTab({ userId }: Props) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </div>
       ))}
     </div>

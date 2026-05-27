@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { ContentPiece } from '@/types'
 import {
@@ -49,12 +49,18 @@ const PIECE_CHIP_BORDER: Record<string, string> = {
 // ── Compact piece card ────────────────────────────────────────────────────────
 
 function PieceChip({ piece, onClick }: { piece: ContentPiece; onClick: () => void }) {
+  const [dragging, setDragging] = useState(false)
   const copyAlert = piece.copyStatus === 'pendiente' && piece.status === 'programado'
   const borderColor = PIECE_CHIP_BORDER[piece.status] ?? 'border-l-slate-300'
   return (
     <div
+      draggable
+      onDragStart={e => { e.stopPropagation(); e.dataTransfer.setData('pieceId', piece.id); setDragging(true) }}
+      onDragEnd={() => setDragging(false)}
       onClick={e => { e.stopPropagation(); onClick() }}
-      className={`flex flex-col rounded px-1.5 py-1 cursor-pointer hover:opacity-80 transition-opacity border-l-2 bg-white border border-slate-100 ${borderColor}`}
+      className={`flex flex-col rounded px-1.5 py-1 border-l-2 bg-white border border-slate-100 transition-all select-none ${borderColor} ${
+        dragging ? 'opacity-40 cursor-grabbing' : 'cursor-grab hover:opacity-80 hover:shadow-sm'
+      }`}
     >
       <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide leading-none">
         {CONTENT_TYPE_LABEL[piece.type]}
@@ -148,7 +154,8 @@ export function CalendarView({ initialPieces, initialInbox, selectedClientId, is
   const [pieces, setPieces] = useState(initialPieces)
   const [inbox, setInbox]   = useState(initialInbox)
   const [selected, setSelected] = useState<ContentPiece | null>(null)
-  const [hoveredDay, setHoveredDay] = useState<string | null>(null)
+  const [hoveredDay, setHoveredDay]   = useState<string | null>(null)
+  const isDraggingRef = useRef(false)
 
   const days  = calendarDays(year, month)
   const today = isoDate(now)
@@ -173,22 +180,38 @@ export function CalendarView({ initialPieces, initialInbox, selectedClientId, is
 
   async function handleDrop(e: React.DragEvent, date: Date) {
     e.preventDefault()
+    e.stopPropagation()
     const pieceId = e.dataTransfer.getData('pieceId')
     if (!pieceId) return
     const dateStr = isoDate(date)
+    setHoveredDay(null)
+    isDraggingRef.current = true
+    setTimeout(() => { isDraggingRef.current = false }, 100)
 
     const piece = inbox.find(p => p.id === pieceId) ?? pieces.find(p => p.id === pieceId)
     if (!piece) return
+    if (piece.scheduledDate?.startsWith(dateStr)) return
 
-    const updated = await api.patch<ContentPiece>(`/api/content/pieces/${pieceId}/schedule`, {
-      scheduledDate: dateStr,
-    })
+    // Optimistic update — move piece immediately
+    const optimistic = { ...piece, scheduledDate: dateStr }
     setInbox(prev => prev.filter(p => p.id !== pieceId))
-    setPieces(prev => {
-      const without = prev.filter(p => p.id !== pieceId)
-      return [...without, updated]
-    })
-    setHoveredDay(null)
+    setPieces(prev => [...prev.filter(p => p.id !== pieceId), optimistic])
+
+    // Persist in background — revert on failure
+    try {
+      const updated = await api.patch<ContentPiece>(`/api/content/pieces/${pieceId}/schedule`, {
+        scheduledDate: dateStr,
+      })
+      setPieces(prev => prev.map(p => p.id === pieceId ? updated : p))
+    } catch {
+      // Revert
+      if (piece.scheduledDate) {
+        setPieces(prev => [...prev.filter(p => p.id !== pieceId), piece])
+      } else {
+        setPieces(prev => prev.filter(p => p.id !== pieceId))
+        setInbox(prev => [piece, ...prev])
+      }
+    }
   }
 
   const handlePieceUpdate = useCallback((updated: ContentPiece) => {
@@ -267,7 +290,7 @@ export function CalendarView({ initialPieces, initialInbox, selectedClientId, is
                 onDragOver={e => { e.preventDefault(); setHoveredDay(ds) }}
                 onDragLeave={() => setHoveredDay(null)}
                 onDrop={e => handleDrop(e, day)}
-                onClick={() => isAdmin && goToNew(ds)}
+                onClick={() => { if (!isDraggingRef.current && isAdmin) goToNew(ds) }}
               >
                 <div className="flex items-center justify-between mb-1">
                   <span className={`text-xs font-semibold w-6 h-6 flex items-center justify-center rounded-full ${

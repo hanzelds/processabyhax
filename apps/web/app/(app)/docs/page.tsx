@@ -44,11 +44,16 @@ export default async function DocsLandingPage() {
     if ((pages ?? []).length > 0) tsContexts.push({ id: ts.id, name: ts.name, emoji: ts.emoji, pages: pages! })
   }
 
+  const HAX_CLIENT_ID = 'cmp4qt2vz001aecg48rkwxxoo'
+  const haxContext   = clientContexts.find(c => c.id === HAX_CLIENT_ID) ?? null
+  const otherClients = clientContexts.filter(c => c.id !== HAX_CLIENT_ID)
+
   return (
     <DocsLandingClient
       workspacePages={workspacePages ?? []}
       teamspaceContexts={tsContexts}
-      clientContexts={clientContexts}
+      clientContexts={otherClients}
+      haxContext={haxContext}
       isAdmin={me.role === 'ADMIN'}
     />
   )

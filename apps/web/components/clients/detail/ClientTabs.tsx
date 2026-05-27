@@ -1,10 +1,11 @@
 'use client'
 
-export type ClientTabId = 'profile' | 'projects' | 'metrics' | 'notes' | 'history' | 'portal' | 'docs'
+export type ClientTabId = 'profile' | 'projects' | 'services' | 'metrics' | 'notes' | 'history' | 'portal' | 'docs'
 
 const TABS: { id: ClientTabId; label: string; icon: string }[] = [
   { id: 'profile',  label: 'Perfil',     icon: '◉' },
   { id: 'projects', label: 'Proyectos',  icon: '⬡' },
+  { id: 'services', label: 'Servicios',  icon: '◧' },
   { id: 'metrics',  label: 'Métricas',   icon: '◈' },
   { id: 'notes',    label: 'Notas',      icon: '✎' },
   { id: 'history',  label: 'Historial',  icon: '◷' },

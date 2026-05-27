@@ -90,7 +90,7 @@ export function ProjectInfoBlock({ project, isAdmin, onUpdate }: Props) {
             <label className="text-xs font-medium text-slate-500 mb-1 block">Descripción</label>
             <textarea rows={3} value={description} onChange={e => setDescription(e.target.value)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-brand-400" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-slate-500 mb-1 block">Estado</label>
               <select value={status} onChange={e => setStatus(e.target.value as any)} className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">

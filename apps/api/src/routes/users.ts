@@ -63,8 +63,16 @@ function relativeTime(date: Date): string {
 // ── GET /users ────────────────────────────────────────────────────────────────
 
 usersRouter.get('/', isAuth, async (req, res) => {
-  if (req.user!.role !== 'ADMIN' && req.user!.role !== 'LEAD') {
-    res.status(403).json({ error: 'Sin permiso' }); return
+  const isAdminOrLead = req.user!.role === 'ADMIN' || req.user!.role === 'LEAD'
+
+  // TEAM users get a minimal list (id, name, area, avatarUrl) for @mention purposes
+  if (!isAdminOrLead) {
+    const users = await prisma.user.findMany({
+      where: { status: 'ACTIVE' },
+      select: { id: true, name: true, area: true, avatarUrl: true, role: true },
+      orderBy: { name: 'asc' },
+    })
+    res.json(users); return
   }
 
   const { status, area, role: roleFilter, q } = req.query

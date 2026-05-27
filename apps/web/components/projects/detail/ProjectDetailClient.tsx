@@ -14,6 +14,7 @@ import { KanbanBoard } from '@/components/kanban/KanbanBoard'
 import { ViewToggle, ViewMode } from './tasks/ViewToggle'
 import { TaskListView } from './tasks/TaskListView'
 import { TaskCalendarView } from './tasks/TaskCalendarView'
+import { BulkTaskModal } from './tasks/BulkTaskModal'
 
 const DEADLINE_BADGE: Record<DeadlineStatus, { label: string; cls: string }> = {
   on_track: { label: '🟢 En tiempo',  cls: 'text-emerald-600' },
@@ -42,6 +43,7 @@ export function ProjectDetailClient({ project: initialProject, metrics, members,
   const [fileCount, setFileCount] = useState(files.length)
   const [taskView, setTaskView] = useState<ViewMode>('kanban')
   const [showNoDate, setShowNoDate] = useState(false)
+  const [showBulk, setShowBulk] = useState(false)
 
   // Persist view preference per project in localStorage
   const storageKey = `project-view-${initialProject.id}`
@@ -124,12 +126,26 @@ export function ProjectDetailClient({ project: initialProject, metrics, members,
 
       {activeTab === 'kanban' && (
         <div>
-          <ViewToggle
-            view={taskView}
-            onChange={changeView}
-            noDateCount={noDateCount}
-            onNoDateClick={() => setShowNoDate(s => !s)}
-          />
+          <div className="flex items-center justify-between mb-5">
+            <ViewToggle
+              view={taskView}
+              onChange={changeView}
+              noDateCount={noDateCount}
+              onNoDateClick={() => setShowNoDate(s => !s)}
+              hideMb
+            />
+            {isAdmin && (
+              <button
+                onClick={() => setShowBulk(true)}
+                className="flex items-center gap-1.5 text-xs font-medium text-slate-500 border border-slate-200 rounded-lg px-3 py-1.5 hover:bg-slate-50 hover:text-[#17394f] hover:border-[#17394f]/30 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 10h16M4 14h10" />
+                </svg>
+                En masa
+              </button>
+            )}
+          </div>
           {taskView === 'kanban' && (
             <KanbanBoard
               initialTasks={tasks}
@@ -155,6 +171,15 @@ export function ProjectDetailClient({ project: initialProject, metrics, members,
               showNoDate={showNoDate}
               onToggleNoDate={() => setShowNoDate(s => !s)}
               onUpdate={handleTaskUpdate}
+            />
+          )}
+
+          {showBulk && (
+            <BulkTaskModal
+              projectId={project.id}
+              users={users}
+              onCreated={newTasks => setTasks(prev => [...prev, ...newTasks])}
+              onClose={() => setShowBulk(false)}
             />
           )}
         </div>

@@ -69,6 +69,7 @@ projectsRouter.get('/', isAuth, async (req, res) => {
     orderBy: { estimatedClose: 'asc' },
     include: {
       client: { select: { id: true, name: true, status: true } },
+      clientService: { select: { id: true, name: true, service: { select: { id: true, name: true, icon: true, color: true } } } },
       members: { include: { user: { select: { id: true, name: true, area: true } } } },
       _count: { select: { tasks: true } },
     },
@@ -110,8 +111,9 @@ projectsRouter.get('/:id', isAuth, async (req, res) => {
     where: { id: req.params.id },
     include: {
       client: true,
+      clientService: { select: { id: true, name: true, service: { select: { id: true, name: true, icon: true, color: true } } } },
       tasks: {
-        where: user!.role === 'TEAM' ? { assignees: { some: { userId: user!.userId } } } : {},
+        where: {},
         orderBy: { createdAt: 'asc' },
         include: { assignees: { include: { user: { select: { id: true, name: true, area: true } } } } },
       },
@@ -173,7 +175,7 @@ projectsRouter.post('/', isAuth, async (req, res) => {
   if (role !== 'ADMIN' && role !== 'LEAD' && projSettings.allow_team_create_projects !== 'true') {
     res.status(403).json({ error: 'No tienes permiso para crear proyectos' }); return
   }
-  const { name, clientId, description, startDate, estimatedClose } = req.body
+  const { name, clientId, description, startDate, estimatedClose, clientServiceId, serviceId } = req.body
   if (!name || !clientId || !startDate) {
     res.status(400).json({ error: 'Nombre, cliente y fecha de inicio son requeridos' }); return
   }
@@ -183,10 +185,36 @@ projectsRouter.post('/', isAuth, async (req, res) => {
   if (projSettings.project_requires_estimated_close === 'true' && !estimatedClose) {
     res.status(400).json({ error: 'La fecha de cierre estimada es obligatoria' }); return
   }
+
+  // Resolve clientServiceId: explicit ID takes priority, then look up/create by serviceId
+  let resolvedClientServiceId: string | null = clientServiceId || null
+  if (serviceId && !resolvedClientServiceId) {
+    // Find an existing active subscription for this client+service, or create one
+    let cs = await prisma.clientService.findFirst({
+      where: { clientId, serviceId, status: 'ACTIVE' },
+    })
+    if (!cs) {
+      cs = await prisma.clientService.create({
+        data: { clientId, serviceId, status: 'ACTIVE' },
+      })
+    }
+    resolvedClientServiceId = cs.id
+  }
+
+  // Validate explicit clientServiceId belongs to same client
+  if (clientServiceId && !serviceId) {
+    const cs = await prisma.clientService.findUnique({ where: { id: clientServiceId } })
+    if (!cs || cs.clientId !== clientId) {
+      res.status(400).json({ error: 'El servicio no pertenece a este cliente' }); return
+    }
+  }
   const client = await prisma.client.findUnique({ where: { id: clientId }, select: { name: true } })
   const project = await prisma.project.create({
-    data: { name, clientId, description, startDate: new Date(startDate), estimatedClose: estimatedClose ? new Date(estimatedClose) : undefined },
-    include: { client: { select: { id: true, name: true } } },
+    data: { name, clientId, description, startDate: new Date(startDate), estimatedClose: estimatedClose ? new Date(estimatedClose) : undefined, clientServiceId: resolvedClientServiceId },
+    include: {
+      client: { select: { id: true, name: true } },
+      clientService: { select: { id: true, name: true, service: { select: { id: true, name: true, icon: true, color: true } } } },
+    },
   })
   await Promise.all([
     logActivity({ actorId: req.user!.userId, eventType: 'project_created', entityType: 'project', entityId: project.id, entityName: project.name, meta: { client_name: client?.name } }),
@@ -199,7 +227,7 @@ projectsRouter.post('/', isAuth, async (req, res) => {
 // ── PATCH /projects/:id ──────────────────────────────────────────────────────
 
 projectsRouter.patch('/:id', isAdmin, async (req, res) => {
-  const { name, description, status, estimatedClose } = req.body
+  const { name, description, status, estimatedClose, clientServiceId } = req.body
   const prev = await prisma.project.findUnique({ where: { id: req.params.id } })
   if (!prev) { res.status(404).json({ error: 'Proyecto no encontrado' }); return }
   const data: Record<string, unknown> = {}
@@ -210,8 +238,16 @@ projectsRouter.patch('/:id', isAdmin, async (req, res) => {
     if (status === 'COMPLETED') data.closedAt = new Date()
   }
   if (estimatedClose !== undefined) data.estimatedClose = estimatedClose ? new Date(estimatedClose) : null
+  if (clientServiceId !== undefined) data.clientServiceId = clientServiceId || null
 
-  const project = await prisma.project.update({ where: { id: req.params.id }, data, include: { client: { select: { id: true, name: true } } } })
+  const project = await prisma.project.update({
+    where: { id: req.params.id },
+    data,
+    include: {
+      client: { select: { id: true, name: true } },
+      clientService: { select: { id: true, name: true, service: { select: { id: true, name: true, icon: true, color: true } } } },
+    },
+  })
 
   const histories: Promise<void>[] = []
   if (status && status !== prev.status) {

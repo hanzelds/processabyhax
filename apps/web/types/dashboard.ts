@@ -65,6 +65,24 @@ export interface TeamKPIs {
   activeProjects: number
 }
 
+export interface AdminOverview {
+  completedThisWeek: number
+  completedThisMonth: number
+  activeClients: number
+  briefsByStatus: { status: string; count: number }[]
+  deadlines: {
+    taskId: string
+    title: string
+    dueDate: string | null
+    daysLeft: number | null
+    projectId: string
+    projectName: string
+    clientName: string
+    assignees: { id: string; name: string }[]
+    status: string
+  }[]
+}
+
 export interface LeadMember {
   id: string
   name: string

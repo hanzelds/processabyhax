@@ -37,7 +37,8 @@ export default async function BriefsPage({ searchParams }: PageProps) {
 
   const params = await searchParams
   const selectedClientId = params.clientId ?? ''
-  const selectedClient = (clients ?? []).find(c => c.id === selectedClientId)
+  const socialClients = (clients ?? []).filter(c => c.socialMedia)
+  const selectedClient = socialClients.find(c => c.id === selectedClientId)
 
   // No client selected → show selector
   if (!selectedClient) {
@@ -47,7 +48,7 @@ export default async function BriefsPage({ searchParams }: PageProps) {
           <h1 className="text-xl font-bold text-slate-900">Preproducción</h1>
           <p className="text-sm text-slate-500 mt-0.5">Pipeline de briefs de contenido</p>
         </div>
-        <ClientSelector clients={clients ?? []} returnPath="/content/briefs" />
+        <ClientSelector clients={socialClients} returnPath="/content/briefs" />
       </div>
     )
   }

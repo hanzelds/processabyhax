@@ -7,6 +7,7 @@ import { logProjectHistory } from '../lib/projectHistory'
 import { sendTaskAssignedEmail, sendTaskStatusChangedEmail, sendGenericEmail } from '../lib/email'
 import { getSettings } from '../lib/settings'
 import { notifyTaskAssigned, notifyTaskStatusChanged } from '../lib/whatsapp'
+import { createNotification, createNotifications } from '../lib/notify'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -89,6 +90,14 @@ async function getAdminEmails(): Promise<string[]> {
   return admins.map(a => a.email)
 }
 
+async function getAdminAndLeadIds(): Promise<string[]> {
+  const users = await prisma.user.findMany({
+    where: { role: { in: ['ADMIN', 'LEAD'] }, status: 'ACTIVE' },
+    select: { id: true },
+  })
+  return users.map(u => u.id)
+}
+
 export const tasksRouter = Router()
 
 // ── GET /my ───────────────────────────────────────────────────────────────────
@@ -138,10 +147,171 @@ tasksRouter.get('/project/:projectId', isAuth, async (req, res) => {
       projectId: req.params.projectId,
       ...(!isAdminOrLead ? { assignees: { some: { userId: user!.userId } } } : {}),
     },
-    include: { assignees: { include: ASSIGNEE_INCLUDE } },
+    include: {
+      assignees: { include: ASSIGNEE_INCLUDE },
+      brief: { select: { id: true, title: true, scripts: { select: { id: true, title: true, status: true } } } },
+    },
     orderBy: { createdAt: 'asc' },
   })
   res.json(tasks.map(t => ({ ...t, assignees: flatAssignees(t.assignees) })))
+})
+
+// ── POST /bulk ────────────────────────────────────────────────────────────────
+
+tasksRouter.post('/bulk', isAuth, async (req, res) => {
+  const { userId, role } = req.user!
+  const { projectId, tasks: rows } = req.body as { projectId: string; tasks: { title: string; taskType?: string; assignees?: string[]; dueDate?: string }[] }
+
+  if (!projectId) { res.status(400).json({ error: 'projectId requerido' }); return }
+  if (!Array.isArray(rows) || rows.length === 0) { res.status(400).json({ error: 'Se requiere al menos una tarea' }); return }
+
+  const settings = await getSettings()
+  if (role === 'TEAM' && settings.allow_team_create_tasks !== 'true') {
+    res.status(403).json({ error: 'Los usuarios Team no pueden crear tareas' }); return
+  }
+
+  const valid = rows.filter(r => typeof r.title === 'string' && r.title.trim().length > 0)
+  if (valid.length === 0) { res.status(400).json({ error: 'No hay tareas válidas' }); return }
+
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    include: { client: { select: { name: true } } },
+  })
+  if (!project) { res.status(404).json({ error: 'Proyecto no encontrado' }); return }
+
+  const created = await prisma.$transaction(
+    valid.map(r =>
+      prisma.task.create({
+        data: {
+          title:     r.title.trim(),
+          projectId,
+          dueDate:   r.dueDate ? new Date(r.dueDate) : null,
+          taskType:  (r.taskType as TaskType | undefined) ?? null,
+          assignees: r.assignees && r.assignees.length > 0
+            ? { create: r.assignees.map(uid => ({ userId: uid, assignedBy: userId })) }
+            : undefined,
+        },
+        include: { assignees: { include: ASSIGNEE_INCLUDE }, project: { select: { id: true, name: true } } },
+      })
+    )
+  )
+
+  // Log history once for the batch
+  await logProjectHistory({
+    projectId, actorId: userId,
+    eventType: 'task_created',
+    description: `${created.length} tarea${created.length !== 1 ? 's' : ''} creada${created.length !== 1 ? 's' : ''} en masa`,
+    meta: { count: created.length, taskIds: created.map(t => t.id) },
+  })
+
+  // Gather all unique assignees across all tasks and notify
+  const actor = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } })
+  const actorName = actor?.name ?? 'Un admin'
+
+  // Collect per-assignee: list of task titles they were assigned to
+  const assigneeTaskMap = new Map<string, { assignee: ReturnType<typeof flatAssignees>[number]; titles: string[] }>()
+
+  for (const task of created) {
+    const taskAssignees = flatAssignees(task.assignees)
+    for (const assignee of activeOnly(taskAssignees)) {
+      await ensureMember(projectId, assignee.id, userId)
+      if (!assigneeTaskMap.has(assignee.id)) {
+        assigneeTaskMap.set(assignee.id, { assignee, titles: [] })
+      }
+      assigneeTaskMap.get(assignee.id)!.titles.push(task.title)
+    }
+  }
+
+  for (const { assignee, titles } of assigneeTaskMap.values()) {
+    // Email (one per unique task, matching old behavior)
+    for (const taskTitle of titles) {
+      sendTaskAssignedEmail({
+        to:            assignee.email,
+        recipientName: assignee.name,
+        assignerName:  actorName,
+        taskTitle,
+        taskTypeLabel: null,
+        projectName:   project.name,
+        clientName:    project.client?.name ?? '',
+        dueDate:       null,
+        projectId,
+      }).catch(console.error)
+    }
+
+    // In-app notification (skip if assignee is the creator)
+    if (assignee.id !== userId) {
+      const body = titles.length === 1
+        ? `${actorName} te asignó "${titles[0]}" en ${project.name}`
+        : `${actorName} te asignó ${titles.length} tareas en ${project.name}`
+      createNotification({
+        userId: assignee.id,
+        type:   'task_assigned',
+        title:  titles.length === 1 ? `Tarea asignada: ${titles[0]}` : `${titles.length} tareas asignadas`,
+        body,
+        link:   `/projects/${projectId}`,
+      }).catch(console.error)
+    }
+  }
+
+  res.status(201).json(created.map(t => ({ ...t, assignees: flatAssignees(t.assignees) })))
+})
+
+// ── GET /standalone ───────────────────────────────────────────────────────────
+
+tasksRouter.get('/standalone', isAuth, async (req, res) => {
+  const { userId, role } = req.user!
+  const today    = new Date(); today.setHours(0, 0, 0, 0)
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1)
+
+  // Roles that the current user can view
+  const viewableRoles: string[] =
+    role === 'ADMIN' ? ['TEAM', 'LEAD'] :
+    role === 'LEAD'  ? ['TEAM'] : []
+
+  // Members list (users whose tasks this user can see)
+  const members = viewableRoles.length > 0
+    ? await prisma.user.findMany({
+        where: { role: { in: viewableRoles as any }, status: 'ACTIVE' },
+        select: { id: true, name: true, role: true, area: true },
+        orderBy: [{ role: 'asc' }, { name: 'asc' }],
+      })
+    : []
+
+  // Determine which userId to filter tasks by
+  const viewUserId = req.query.viewUserId as string | undefined
+  let targetUserId: string | null = null
+
+  if (!viewUserId || viewUserId === userId) {
+    // Viewing own tasks
+    targetUserId = userId
+  } else if (viewableRoles.length > 0) {
+    // Admin/Lead viewing a team member — verify they're allowed
+    const member = members.find(m => m.id === viewUserId)
+    if (!member) { res.status(403).json({ error: 'Sin permiso para ver este usuario' }); return }
+    targetUserId = viewUserId
+  } else {
+    targetUserId = userId
+  }
+
+  const baseWhere = {
+    projectId: null,
+    assignees: { some: { userId: targetUserId } },
+  }
+  const include = { assignees: { include: ASSIGNEE_INCLUDE } }
+
+  const [overdue, todayTasks, pending, completed] = await Promise.all([
+    prisma.task.findMany({ where: { ...baseWhere, status: { notIn: ['COMPLETED'] }, dueDate: { lt: today } }, include, orderBy: { dueDate: 'asc' } }),
+    prisma.task.findMany({ where: { ...baseWhere, status: { notIn: ['COMPLETED'] }, dueDate: { gte: today, lt: tomorrow } }, include, orderBy: { dueDate: 'asc' } }),
+    prisma.task.findMany({ where: { ...baseWhere, status: { notIn: ['COMPLETED'] }, OR: [{ dueDate: null }, { dueDate: { gte: tomorrow } }] }, include, orderBy: { createdAt: 'desc' } }),
+    prisma.task.findMany({ where: { ...baseWhere, status: 'COMPLETED' }, include, orderBy: { completedAt: 'desc' }, take: 20 }),
+  ])
+
+  const fmt = (arr: typeof overdue) => arr.map(t => ({ ...t, assignees: flatAssignees(t.assignees) }))
+  res.json({
+    overdue: fmt(overdue), today: fmt(todayTasks), pending: fmt(pending), completed: fmt(completed),
+    members,        // users this role can switch to
+    viewUserId: targetUserId,
+  })
 })
 
 // ── POST / ────────────────────────────────────────────────────────────────────
@@ -149,14 +319,15 @@ tasksRouter.get('/project/:projectId', isAuth, async (req, res) => {
 tasksRouter.post('/', isAuth, async (req, res) => {
   const { userId, role } = req.user!
   const { title, description, projectId, assignees: assigneeIds, dueDate, taskType } = req.body
-  if (!title || !projectId) { res.status(400).json({ error: 'Título y proyecto son requeridos' }); return }
+  if (!title) { res.status(400).json({ error: 'El título es requerido' }); return }
 
   const settings = await getSettings()
-  if (role === 'TEAM' && settings.allow_team_create_tasks !== 'true') {
-    res.status(403).json({ error: 'Los usuarios Team no pueden crear tareas en este sistema' }); return
+  // Personal tasks (no projectId) are always allowed — any user can manage their own workload.
+  // The allow_team_create_tasks setting only restricts creating tasks inside projects.
+  if (role === 'TEAM' && projectId && settings.allow_team_create_tasks !== 'true') {
+    res.status(403).json({ error: 'Los usuarios Team no pueden crear tareas en proyectos en este sistema' }); return
   }
   if (role !== 'ADMIN' && role !== 'LEAD') {
-    // TEAM can only create tasks assigned to themselves
     const ids: string[] = Array.isArray(assigneeIds) ? assigneeIds : (assigneeIds ? [assigneeIds] : [])
     if (ids.some(id => id !== userId)) {
       res.status(403).json({ error: 'Solo puedes crear tareas asignadas a ti mismo' }); return
@@ -166,21 +337,25 @@ tasksRouter.post('/', isAuth, async (req, res) => {
     res.status(400).json({ error: 'El tipo de tarea es obligatorio' }); return
   }
 
-  // Normalize assignees list
   let effectiveAssignees: string[] = Array.isArray(assigneeIds) ? assigneeIds : (assigneeIds ? [assigneeIds] : [])
-  // Auto-assign to creator if setting is on and no assignee provided
   if (effectiveAssignees.length === 0 && settings.auto_assign_to_creator === 'true') {
     effectiveAssignees = [userId]
   }
 
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    include: { client: { select: { name: true } } },
-  })
+  // Validate project if provided
+  let project: { name: string; client: { name: string } } | null = null
+  if (projectId) {
+    project = await prisma.project.findUnique({
+      where: { id: projectId },
+      include: { client: { select: { name: true } } },
+    })
+    if (!project) { res.status(404).json({ error: 'Proyecto no encontrado' }); return }
+  }
 
   const task = await prisma.task.create({
     data: {
-      title, description, projectId,
+      title, description,
+      projectId: projectId || null,
       dueDate:   dueDate ? new Date(dueDate) : null,
       taskType:  taskType as TaskType | undefined ?? null,
       assignees: effectiveAssignees.length > 0
@@ -192,16 +367,18 @@ tasksRouter.post('/', isAuth, async (req, res) => {
 
   const taskAssignees = flatAssignees(task.assignees)
 
-  await logActivity({ actorId: userId, eventType: 'task_created', entityType: 'task', entityId: task.id, entityName: task.title, meta: { project_id: projectId, project_name: project?.name } })
-  await logProjectHistory({ projectId, actorId: userId, eventType: 'task_created', description: `Tarea "${task.title}" creada${taskAssignees.length ? ` y asignada a ${taskAssignees.map(a => a.name).join(', ')}` : ''}`, meta: { taskId: task.id } })
+  await logActivity({ actorId: userId, eventType: 'task_created', entityType: 'task', entityId: task.id, entityName: task.title, meta: { project_id: projectId ?? null, project_name: project?.name ?? null } })
+
+  if (projectId) {
+    await logProjectHistory({ projectId, actorId: userId, eventType: 'task_created', description: `Tarea "${task.title}" creada${taskAssignees.length ? ` y asignada a ${taskAssignees.map(a => a.name).join(', ')}` : ''}`, meta: { taskId: task.id } })
+  }
 
   if (effectiveAssignees.length > 0) {
-    await logActivity({ actorId: userId, eventType: 'task_assigned', entityType: 'task', entityId: task.id, entityName: task.title, meta: { assigned_to: effectiveAssignees, project_name: project?.name } })
+    await logActivity({ actorId: userId, eventType: 'task_assigned', entityType: 'task', entityId: task.id, entityName: task.title, meta: { assigned_to: effectiveAssignees, project_name: project?.name ?? null } })
     const actor = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } })
 
     for (const assignee of activeOnly(taskAssignees)) {
-      await ensureMember(projectId, assignee.id, userId)
-      // Email (fire-and-forget)
+      if (projectId) await ensureMember(projectId, assignee.id, userId)
       sendTaskAssignedEmail({
         to:            assignee.email,
         recipientName: assignee.name,
@@ -211,15 +388,23 @@ tasksRouter.post('/', isAuth, async (req, res) => {
         projectName:   project?.name ?? '',
         clientName:    project?.client?.name ?? '',
         dueDate:       task.dueDate ?? null,
-        projectId,
+        projectId:     projectId ?? '',
       }).catch(console.error)
-      // WhatsApp (fire-and-forget)
       notifyTaskAssigned({
         user:        { phone: assignee.phone ?? null, whatsappNotif: assignee.whatsappNotif },
         taskTitle:   task.title,
         projectName: project?.name ?? '',
         dueDate:     task.dueDate,
       }).catch(console.error)
+      if (assignee.id !== userId) {
+        createNotification({
+          userId: assignee.id,
+          type:   'task_assigned',
+          title:  `Tarea asignada: ${task.title}`,
+          body:   `${actor?.name ?? 'Un admin'} te asignó una tarea${project ? ` en ${project.name}` : ''}`,
+          link:   projectId ? `/projects/${projectId}` : '/tasks',
+        }).catch(console.error)
+      }
     }
   }
 
@@ -313,6 +498,15 @@ tasksRouter.patch('/:id', isAuth, async (req, res) => {
           projectName: task.project.name,
           dueDate:     updated.dueDate,
         }).catch(console.error)
+        if (assignee.id !== user!.userId) {
+          createNotification({
+            userId: assignee.id,
+            type:   'task_assigned',
+            title:  `Tarea asignada: ${task.title}`,
+            body:   `${actor?.name ?? 'Un admin'} te asignó una tarea en ${task.project.name}`,
+            link:   `/projects/${task.projectId}`,
+          }).catch(console.error)
+        }
       }
     }
 
@@ -352,6 +546,20 @@ tasksRouter.patch('/:id', isAuth, async (req, res) => {
         changerName: actor?.name ?? 'Usuario',
       }).catch(console.error)
     }
+
+    // In-app notifications: admins + leads + assignees (excluding changer)
+    const actorName = actor?.name ?? 'Usuario'
+    const assigneeIds = flatAssignees(updated.assignees).map(a => a.id)
+    getAdminAndLeadIds().then(async adminIds => {
+      const allTargets = [...new Set([...adminIds, ...assigneeIds])].filter(id => id !== user!.userId)
+      await createNotifications(allTargets.map(userId => ({
+        userId,
+        type:  'task_status_changed',
+        title: `Tarea actualizada: ${task.title}`,
+        body:  `${actorName} cambió el estado a ${status}`,
+        link:  `/projects/${task.projectId}`,
+      })))
+    }).catch(console.error)
   }
 
   res.json({ ...updated, assignees: flatAssignees(updated.assignees) })
@@ -414,6 +622,20 @@ tasksRouter.patch('/:id/status', isAuth, async (req, res) => {
       changerName: actor?.name ?? 'Usuario',
     }).catch(console.error)
   }
+
+  // In-app notifications: admins + leads + assignees (excluding changer)
+  const statusActorName = actor?.name ?? 'Usuario'
+  const statusAssigneeIds = flatAssignees(updated.assignees).map(a => a.id)
+  getAdminAndLeadIds().then(async adminIds => {
+    const allTargets = [...new Set([...adminIds, ...statusAssigneeIds])].filter(id => id !== req.user!.userId)
+    await createNotifications(allTargets.map(userId => ({
+      userId,
+      type:  'task_status_changed',
+      title: `Tarea actualizada: ${task.title}`,
+      body:  `${statusActorName} cambió el estado a ${status}`,
+      link:  `/projects/${task.projectId}`,
+    })))
+  }).catch(console.error)
 
   // If task has a brief and just completed, check if all brief production tasks are done
   if (status === 'COMPLETED' && briefId) {

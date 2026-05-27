@@ -20,8 +20,10 @@ async function clientMetricsInline(clientId: string) {
 
 // ── GET /clients (enriched list) ─────────────────────────────────────────────
 
-clientsRouter.get('/', requirePermission('clients.read'), async (_req, res) => {
+clientsRouter.get('/', requirePermission('clients.read'), async (req, res) => {
+  const isPartner = req.user!.role === 'PARTNER'
   const clients = await prisma.client.findMany({
+    where: isPartner ? { commercialPartner: true } : undefined,
     orderBy: [{ tier: 'asc' }, { name: 'asc' }],
     include: {
       _count: { select: { projects: true } },
@@ -56,12 +58,19 @@ clientsRouter.get('/:id', requirePermission('clients.read'), async (req, res) =>
     },
   })
   if (!client) { res.status(404).json({ error: 'Cliente no encontrado' }); return }
+  if (req.user!.role === 'PARTNER' && !client.commercialPartner) {
+    res.status(403).json({ error: 'Acceso denegado' }); return
+  }
   res.json({ ...client, tags: client.tags.map(ct => ct.tag) })
 })
 
 // ── GET /clients/:id/metrics ──────────────────────────────────────────────────
 
 clientsRouter.get('/:id/metrics', requirePermission('clients.read'), async (req, res) => {
+  if (req.user!.role === 'PARTNER') {
+    const c = await prisma.client.findUnique({ where: { id: req.params.id }, select: { commercialPartner: true } })
+    if (!c?.commercialPartner) { res.status(403).json({ error: 'Acceso denegado' }); return }
+  }
   const today = new Date(); today.setHours(0, 0, 0, 0)
   const clientId = req.params.id
 
@@ -128,7 +137,7 @@ clientsRouter.get('/:id/metrics', requirePermission('clients.read'), async (req,
 // ── POST /clients ─────────────────────────────────────────────────────────────
 
 clientsRouter.post('/', isAdmin, async (req, res) => {
-  const { name, contactName, contactInfo, industry, tier, website, description, relationStart } = req.body
+  const { name, contactName, contactInfo, industry, tier, website, description, relationStart, socialMedia, commercialPartner } = req.body
   if (!name || !contactName || !contactInfo) {
     res.status(400).json({ error: 'Nombre, contacto y dato de contacto son requeridos' }); return
   }
@@ -140,6 +149,8 @@ clientsRouter.post('/', isAdmin, async (req, res) => {
       website: website || null,
       description: description || null,
       relationStart: relationStart ? new Date(relationStart) : null,
+      socialMedia: socialMedia === true,
+      commercialPartner: commercialPartner === true,
     },
   })
   await Promise.all([
@@ -152,7 +163,7 @@ clientsRouter.post('/', isAdmin, async (req, res) => {
 // ── PATCH /clients/:id ────────────────────────────────────────────────────────
 
 clientsRouter.patch('/:id', isAdmin, async (req, res) => {
-  const { name, contactName, contactInfo, status, industry, tier, website, description, relationStart, color } = req.body
+  const { name, contactName, contactInfo, status, industry, tier, website, description, relationStart, color, socialMedia, commercialPartner } = req.body
   const prev = await prisma.client.findUnique({ where: { id: req.params.id } })
   if (!prev) { res.status(404).json({ error: 'Cliente no encontrado' }); return }
 
@@ -167,6 +178,8 @@ clientsRouter.patch('/:id', isAdmin, async (req, res) => {
   if (description !== undefined) data.description = description || null
   if (relationStart !== undefined) data.relationStart = relationStart ? new Date(relationStart) : null
   if (color !== undefined) data.color = color || null
+  if (socialMedia !== undefined) data.socialMedia = socialMedia === true
+  if (commercialPartner !== undefined) data.commercialPartner = commercialPartner === true
 
   const client = await prisma.client.update({ where: { id: req.params.id }, data })
 
@@ -185,6 +198,10 @@ clientsRouter.patch('/:id', isAdmin, async (req, res) => {
 // ── CONTACTS ──────────────────────────────────────────────────────────────────
 
 clientsRouter.get('/:id/contacts', requirePermission('clients.read'), async (req, res) => {
+  if (req.user!.role === 'PARTNER') {
+    const c = await prisma.client.findUnique({ where: { id: req.params.id }, select: { commercialPartner: true } })
+    if (!c?.commercialPartner) { res.status(403).json({ error: 'Acceso denegado' }); return }
+  }
   const contacts = await prisma.clientContact.findMany({
     where: { clientId: req.params.id },
     orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
@@ -259,6 +276,10 @@ clientsRouter.delete('/:id/tags/:tagId', isAdmin, async (req, res) => {
 // ── NOTES ─────────────────────────────────────────────────────────────────────
 
 clientsRouter.get('/:id/notes', requirePermission('clients.read'), async (req, res) => {
+  if (req.user!.role === 'PARTNER') {
+    const c = await prisma.client.findUnique({ where: { id: req.params.id }, select: { commercialPartner: true } })
+    if (!c?.commercialPartner) { res.status(403).json({ error: 'Acceso denegado' }); return }
+  }
   const limit = Math.min(parseInt(req.query.limit as string) || 10, 50)
   const offset = parseInt(req.query.offset as string) || 0
 
@@ -321,6 +342,10 @@ clientsRouter.delete('/:id/notes/:noteId', isAdminOrLead, async (req, res) => {
 // ── HISTORY ───────────────────────────────────────────────────────────────────
 
 clientsRouter.get('/:id/history', requirePermission('clients.read'), async (req, res) => {
+  if (req.user!.role === 'PARTNER') {
+    const c = await prisma.client.findUnique({ where: { id: req.params.id }, select: { commercialPartner: true } })
+    if (!c?.commercialPartner) { res.status(403).json({ error: 'Acceso denegado' }); return }
+  }
   const limit = Math.min(parseInt(req.query.limit as string) || 20, 100)
   const offset = parseInt(req.query.offset as string) || 0
 

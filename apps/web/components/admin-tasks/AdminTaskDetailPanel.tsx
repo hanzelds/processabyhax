@@ -94,7 +94,7 @@ export function AdminTaskDetailPanel({ task, onClose, onStatusChange, onComplete
   return (
     <>
       {/* Backdrop */}
-      <div className="fixed inset-0 z-[9980] bg-black/20" onClick={onClose} />
+      <div className="fixed inset-0 z-[9980] bg-black/20" />
 
       {/* Panel */}
       <div className="fixed right-0 top-0 bottom-0 z-[9981] w-full max-w-lg bg-white shadow-2xl flex flex-col">
