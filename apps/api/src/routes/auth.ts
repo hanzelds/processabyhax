@@ -89,7 +89,7 @@ authRouter.post('/logout', async (req, res) => {
 authRouter.get('/me', isAuth, async (req, res) => {
   const user = await prisma.user.findUnique({
     where: { id: req.user!.userId },
-    select: { id: true, name: true, email: true, role: true, area: true, status: true, avatarUrl: true, bio: true, phone: true, whatsappNotif: true, joinedAt: true, lastSeenAt: true, createdAt: true },
+    select: { id: true, name: true, email: true, role: true, area: true, status: true, avatarUrl: true, bio: true, joinedAt: true, lastSeenAt: true, createdAt: true },
   })
   if (!user) { res.status(404).json({ error: 'Usuario no encontrado' }); return }
   const permissions = await getEffectivePermissions(user.id, user.role)

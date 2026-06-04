@@ -66,12 +66,23 @@ export interface ContentBrief {
   history?: BriefHistoryEntry[]
   _count?: { scripts: number }
   scripts?: Array<{ id: string; title: string; status: string }>
+  contentPieces?: Array<{
+    id: string
+    title: string
+    type: ContentType
+    platforms: ContentPlatform[]
+    status: ContentPieceStatus
+    scheduledDate: string | null
+    scheduledTime: string | null
+    calendarDraft: boolean
+    copyStatus: CopyStatus
+  }>
 }
 
 export interface ContentPiece {
   id: string
   briefId?: string | null
-  brief?: { id: string; title: string; status: BriefStatus } | null
+  brief?: { id: string; title: string; status: BriefStatus; copyDraft?: string | null; hashtags?: string | null } | null
   clientId: string
   client: { id: string; name: string; color?: string | null }
   title: string
@@ -86,6 +97,7 @@ export interface ContentPiece {
   scheduledDate?: string | null
   scheduledTime?: string | null
   publishedAt?: string | null
+  calendarDraft?: boolean
   createdBy: { id: string; name: string }
   createdAt: string
   updatedAt: string
@@ -128,8 +140,6 @@ export interface User {
   area?: string | null
   avatarUrl?: string | null
   bio?: string | null
-  phone?: string | null
-  whatsappNotif?: boolean
   joinedAt?: string | null
   lastSeenAt?: string | null
   createdAt: string
@@ -439,7 +449,8 @@ export interface AdminTaskAlerts {
 export type DocBlockType =
   | 'paragraph' | 'heading_1' | 'heading_2' | 'heading_3'
   | 'bulleted_list' | 'numbered_list' | 'divider'
-  | 'callout' | 'code' | 'image' | 'child_page'
+  | 'callout' | 'code' | 'image' | 'child_page' | 'table'
+  | 'toggle' | 'quote' | 'embed' | 'video'
 
 export interface DocBlock {
   id: string
@@ -455,6 +466,14 @@ export interface DocBlock {
     pageId?: string
     title?: string
     pageIcon?: string
+    // Table
+    headers?: string[]
+    rows?: string[][]
+    // Toggle
+    open?: boolean
+    children?: DocBlock[]
+    // Embed
+    service?: string
   }
 }
 
@@ -816,4 +835,79 @@ export interface DayPlanData {
   shoots:        Shoot[]
   contentPieces: ContentPiece[]
   workBlocks:    WorkBlock[]
+}
+
+export interface InstagramCredential {
+  id: string
+  clientId: string
+  client: { id: string; name: string; color?: string | null }
+  username: string
+  hasEmail: boolean
+  notes?: string | null
+  addedBy: { id: string; name: string }
+  createdAt: string
+  updatedAt: string
+}
+
+// ── Meta Ads ──────────────────────────────────────────────────────────────────
+export interface MetaAdAccount {
+  id: string
+  name: string
+  currency: string
+  account_status: number
+  amount_spent?: string
+}
+
+export interface MetaCampaign {
+  id: string
+  name: string
+  status: 'ACTIVE' | 'PAUSED' | 'ARCHIVED' | 'DELETED'
+  objective: string
+  daily_budget?: string
+  lifetime_budget?: string
+  start_time?: string
+  stop_time?: string
+}
+
+export interface MetaInsights {
+  campaign_id?: string
+  campaign_name?: string
+  spend: string
+  impressions: string
+  clicks: string
+  ctr: string
+  cpm: string
+  reach: string
+  actions?: { action_type: string; value: string }[]
+  date_start: string
+  date_stop: string
+}
+
+export interface MetaPage {
+  id: string
+  name: string
+  fan_count: number
+  followers_count?: number
+  category: string
+  picture?: { data: { url: string } }
+}
+
+export interface ClientMetaAccount {
+  id: string
+  clientId: string
+  client?: { id: string; name: string; color: string | null }
+  adAccountId: string
+  adAccountName: string
+  pageId: string | null
+  pageName: string | null
+  createdAt: string
+  metrics?: {
+    spend: string
+    impressions: string
+    clicks: string
+    ctr: string
+    cpm: string
+    reach: string
+    activeCampaigns: number
+  } | null
 }

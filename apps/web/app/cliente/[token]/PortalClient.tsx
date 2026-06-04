@@ -17,9 +17,16 @@ const PLATFORM_SHORT: Record<string, string> = {
   instagram: 'IG', tiktok: 'TK', facebook: 'FB', linkedin: 'LI', youtube: 'YT',
 }
 
-function approvalOf(item: { portalApproval: { action: string } | null }): 'pending' | 'approved' | 'changes' {
-  if (!item.portalApproval) return 'pending'
-  return item.portalApproval.action === 'approved' ? 'approved' : 'changes'
+function approvalOf(item: { portalApproval?: { action: string } | null; contentApproval?: { action: string } | null }): 'pending' | 'approved' | 'changes' {
+  const a = item.contentApproval ?? item.portalApproval ?? null
+  if (!a) return 'pending'
+  return a.action === 'approved' ? 'approved' : 'changes'
+}
+
+function dateApprovalOf(piece: PortalPiece): 'pending' | 'approved' | 'changes' {
+  if (!piece.calendarDraft) return 'approved' // no draft = no date review needed
+  if (!piece.dateApproval) return 'pending'
+  return piece.dateApproval.action === 'approved' ? 'approved' : 'changes'
 }
 
 function fmtDate(d: string | null) {
@@ -244,13 +251,14 @@ function ScriptViewer({ scripts }: { scripts: PortalScript[] }) {
   )
 }
 
-// ── Review card (piece or brief) ──────────────────────────────────────────────
+// ── Unified review card (content + date in one) ───────────────────────────────
 
 function ReviewCard({
   id, title, type, platforms, scheduledDate, scheduledTime,
   copy, hashtags, notes, refsUrls, script, concept, technicalNotes, files,
   briefId, scripts, approval, priorFeedback,
-  onApprove, onChanges,
+  calendarDraft, dateApproval: dateSt, priorDateFeedback,
+  onApprove, onChanges, onApproveDate, onChangesDate, onRejectDate,
 }: {
   id: string
   title: string
@@ -270,41 +278,72 @@ function ReviewCard({
   scripts?: PortalScript[]
   approval: 'pending' | 'approved' | 'changes'
   priorFeedback?: string | null
+  // Date approval props (optional — only for pieces with calendarDraft=true)
+  calendarDraft?: boolean
+  dateApproval?: 'pending' | 'approved' | 'changes'
+  priorDateFeedback?: string | null
   onApprove: () => void
   onChanges: (feedback: string) => void
+  onApproveDate?: () => void
+  onChangesDate?: (feedback: string) => void
+  onRejectDate?: (feedback: string) => void
 }) {
-  const [mode, setMode] = useState<'idle' | 'changes'>('idle')
+  const [contentMode, setContentMode] = useState<'idle' | 'changes'>('idle')
+  const [dateMode, setDateMode]       = useState<'idle' | 'changes' | 'reject'>('idle')
+  const [dateFeedback, setDateFeedback] = useState('')
   const [saving, setSaving] = useState(false)
 
+  const isApproved    = approval === 'approved'
+  const hasDateDraft  = !!calendarDraft
+  const dateApproved  = dateSt === 'approved'
+  const dateChanges   = dateSt === 'changes'
+
+  // Overall card border: if anything pending → white; all done → green; any changes → amber
+  const allContentDone = isApproved || approval === 'changes'
+  const allDateDone    = !hasDateDraft || dateApproved || dateChanges
+  const anyPending     = !allContentDone || (hasDateDraft && !allDateDone)
+
   async function handleApprove() {
-    setSaving(true)
-    try { await onApprove() } finally { setSaving(false) }
+    setSaving(true); try { await onApprove() } finally { setSaving(false) }
   }
-  async function handleChanges(feedback: string) {
+  async function handleChanges(fb: string) {
+    setSaving(true); try { await onChanges(fb); setContentMode('idle') } finally { setSaving(false) }
+  }
+  async function handleApproveDate() {
+    if (!onApproveDate) return
+    setSaving(true); try { await onApproveDate() } finally { setSaving(false) }
+  }
+  async function handleDateSubmit() {
+    if (!dateFeedback.trim()) return
     setSaving(true)
-    try { await onChanges(feedback); setMode('idle') } finally { setSaving(false) }
+    try {
+      if (dateMode === 'changes') await onChangesDate?.(dateFeedback)
+      else await onRejectDate?.(dateFeedback)
+      setDateMode('idle'); setDateFeedback('')
+    } finally { setSaving(false) }
   }
 
-  const isPending = approval === 'pending'
-  const isApproved = approval === 'approved'
+  const dateLabel = scheduledDate
+    ? new Date(scheduledDate + 'T00:00:00').toLocaleDateString('es-DO', { weekday: 'long', day: 'numeric', month: 'long' })
+    : null
 
   return (
     <div className={`rounded-2xl border overflow-hidden transition-all ${
-      isApproved ? 'border-emerald-200 bg-emerald-50/30' :
-      approval === 'changes' ? 'border-amber-200 bg-amber-50/30' :
-      'border-slate-200 bg-white shadow-sm'
+      anyPending ? 'border-slate-200 bg-white shadow-sm' :
+      (isApproved && allDateDone) ? 'border-emerald-200 bg-emerald-50/30' :
+      'border-amber-200 bg-amber-50/30'
     }`}>
-      {/* Story format badge */}
+      {/* Story badge */}
       {type === 'story' && (
-        <div className="flex items-center gap-1.5 px-4 pt-3 pb-0">
+        <div className="px-4 pt-3 pb-0">
           <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 border border-yellow-200">
             📱 Formato Story · Vertical 9:16
           </span>
         </div>
       )}
 
-      {/* Card header */}
-      <div className="px-4 pt-3 pb-3">
+      {/* Header */}
+      <div className="px-4 pt-3 pb-2">
         <div className="flex items-start gap-3">
           <span className="text-2xl mt-0.5 shrink-0">{TYPE_ICON[type] ?? '📄'}</span>
           <div className="flex-1 min-w-0">
@@ -313,111 +352,127 @@ function ReviewCard({
               {platforms.slice(0, 3).map(p => (
                 <span key={p} className="text-[10px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{PLATFORM_SHORT[p] ?? p}</span>
               ))}
-              {scheduledDate && (
-                <span className="text-xs text-slate-400">{fmtDate(scheduledDate)}{scheduledTime ? ` · ${scheduledTime}` : ''}</span>
-              )}
             </div>
             <p className="font-semibold text-slate-900 leading-snug">{title}</p>
-          </div>
-          {/* Status pill */}
-          <div className="shrink-0">
-            {isApproved && <span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-full">✓ Aprobado</span>}
-            {approval === 'changes' && <span className="text-xs font-bold bg-amber-100 text-amber-700 px-2.5 py-1 rounded-full">Cambios solicitados</span>}
           </div>
         </div>
       </div>
 
-      {/* Content body — always visible */}
-      <div className="px-4 pb-4 space-y-3">
-        {concept && (
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Concepto</p>
-            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{concept}</p>
-          </div>
-        )}
-        {script && (
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Guión</p>
-            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap bg-slate-50 rounded-xl p-3">{script}</p>
-          </div>
-        )}
-        {scripts && scripts.length > 0 && (
-          <ScriptViewer scripts={scripts} />
-        )}
-        {copy && (
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Caption</p>
-            <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{copy}</p>
-          </div>
-        )}
-        {hashtags && (
-          <p className="text-sm text-[#17394f] leading-relaxed">{hashtags}</p>
-        )}
-        {technicalNotes && (
-          <div className="bg-slate-50 rounded-xl px-3 py-2">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Notas técnicas</p>
-            <p className="text-xs text-slate-600 leading-relaxed">{technicalNotes}</p>
-          </div>
-        )}
-        {notes && (
-          <div className="bg-slate-50 rounded-xl px-3 py-2">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Nota del equipo</p>
-            <p className="text-xs text-slate-600 italic leading-relaxed">{notes}</p>
-          </div>
-        )}
+      {/* Content body */}
+      <div className="px-4 pb-2 space-y-3">
+        {concept && <div><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Concepto</p><p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{concept}</p></div>}
+        {script && <div><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Guión</p><p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap bg-slate-50 rounded-xl p-3">{script}</p></div>}
+        {scripts && scripts.length > 0 && <ScriptViewer scripts={scripts} />}
+        {copy && <div><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Caption</p><p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{copy}</p></div>}
+        {hashtags && <p className="text-sm text-[#17394f] leading-relaxed">{hashtags}</p>}
+        {technicalNotes && <div className="bg-slate-50 rounded-xl px-3 py-2"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Notas técnicas</p><p className="text-xs text-slate-600 leading-relaxed">{technicalNotes}</p></div>}
+        {notes && <div className="bg-slate-50 rounded-xl px-3 py-2"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Nota del equipo</p><p className="text-xs text-slate-600 italic leading-relaxed">{notes}</p></div>}
         {refsUrls && refsUrls.length > 0 && (
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Referencias</p>
-            {refsUrls.map((url, i) => (
-              <a key={i} href={url} target="_blank" rel="noopener noreferrer"
-                className="block text-sm text-[#17394f] underline truncate">{url}</a>
-            ))}
+          <div><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Referencias</p>
+            {refsUrls.map((url, i) => <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="block text-sm text-[#17394f] underline truncate">{url}</a>)}
           </div>
         )}
         {files && files.length > 0 && briefId && (
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">📎 Archivos ({files.length})</p>
-            <div className="space-y-1.5">
-              {files.map(f => <FileAttachment key={f.id} briefId={briefId} file={f} />)}
-            </div>
+          <div><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">📎 Archivos ({files.length})</p>
+            <div className="space-y-1.5">{files.map(f => <FileAttachment key={f.id} briefId={briefId} file={f} />)}</div>
           </div>
         )}
-
-        {/* Prior changes feedback */}
         {approval === 'changes' && priorFeedback && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
             <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest mb-1">Tu comentario</p>
             <p className="text-sm text-amber-800">"{priorFeedback}"</p>
           </div>
         )}
+      </div>
 
-        {/* Action zone */}
+      {/* ── Content action zone ── */}
+      <div className="px-4 pb-3">
         {isApproved ? (
-          <div className="flex items-center gap-2 pt-1">
-            <span className="text-emerald-500 text-lg">✅</span>
-            <span className="text-sm font-semibold text-emerald-700">Aprobado — gracias</span>
+          <div className="flex items-center gap-2 py-1">
+            <span className="text-emerald-500">✅</span>
+            <span className="text-sm font-semibold text-emerald-700">Contenido aprobado</span>
           </div>
-        ) : mode === 'changes' ? (
-          <ChangesForm onSubmit={handleChanges} onCancel={() => setMode('idle')} saving={saving} />
+        ) : contentMode === 'changes' ? (
+          <ChangesForm onSubmit={handleChanges} onCancel={() => setContentMode('idle')} saving={saving} />
         ) : (
-          <div className="flex gap-2 pt-1">
-            <button
-              onClick={handleApprove}
-              disabled={saving}
-              className="flex-1 bg-[#17394f] hover:bg-[#17394f]/90 disabled:opacity-40 text-white font-semibold rounded-xl py-3 text-sm transition active:scale-[.98]"
-            >
+          <div className="flex gap-2">
+            <button onClick={handleApprove} disabled={saving}
+              className="flex-1 bg-[#17394f] hover:bg-[#17394f]/90 disabled:opacity-40 text-white font-semibold rounded-xl py-3 text-sm transition active:scale-[.98]">
               {saving ? '…' : '✅ Aprobar'}
             </button>
-            <button
-              onClick={() => setMode('changes')}
-              disabled={saving}
-              className="flex-1 border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-700 font-semibold rounded-xl py-3 text-sm transition active:scale-[.98]"
-            >
+            <button onClick={() => setContentMode('changes')} disabled={saving}
+              className="flex-1 border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-700 font-semibold rounded-xl py-3 text-sm transition active:scale-[.98]">
               ✏️ Pedir cambios
             </button>
           </div>
         )}
       </div>
+
+      {/* ── Date section (only when calendarDraft=true) ── */}
+      {hasDateDraft && (
+        <div className="mx-4 mb-4 rounded-2xl border border-sky-200 bg-sky-50/60 overflow-hidden">
+          {/* Date header */}
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-sky-100">
+            <span className="text-xl shrink-0">📅</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-bold text-sky-600 uppercase tracking-widest mb-0.5">Fecha de publicación propuesta</p>
+              <p className="text-sm font-semibold text-slate-800 capitalize">{dateLabel ?? '—'}{scheduledTime ? ` · ${scheduledTime.slice(0, 5)}` : ''}</p>
+            </div>
+            {dateApproved && <span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full shrink-0">✓ Ok</span>}
+            {dateChanges && <span className="text-xs font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full shrink-0">Cambio pedido</span>}
+          </div>
+
+          {/* Prior date feedback */}
+          {dateChanges && priorDateFeedback && (
+            <div className="px-4 py-2.5 border-b border-sky-100">
+              <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest mb-1">Tu comentario</p>
+              <p className="text-sm text-amber-800">"{priorDateFeedback}"</p>
+              <p className="text-[10px] text-amber-500 mt-1">Esperando nueva propuesta del equipo</p>
+            </div>
+          )}
+
+          {/* Date actions */}
+          <div className="px-4 py-3">
+            {dateApproved ? (
+              <div className="flex items-center gap-2">
+                <span className="text-emerald-500">✅</span>
+                <span className="text-sm font-semibold text-emerald-700">Fecha confirmada</span>
+              </div>
+            ) : dateMode !== 'idle' ? (
+              <div className="space-y-2">
+                <textarea autoFocus rows={2} value={dateFeedback} onChange={e => setDateFeedback(e.target.value)}
+                  placeholder={dateMode === 'changes' ? 'Ej: Prefiero otro día de la semana…' : 'Ej: Esa semana tenemos un evento…'}
+                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm placeholder-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-300 resize-none bg-white"
+                />
+                <div className="flex gap-2">
+                  <button onClick={handleDateSubmit} disabled={saving || !dateFeedback.trim()}
+                    className={`flex-1 disabled:opacity-40 text-white text-sm font-semibold rounded-xl py-2 transition ${dateMode === 'changes' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-red-500 hover:bg-red-600'}`}>
+                    {saving ? '…' : 'Enviar'}
+                  </button>
+                  <button onClick={() => { setDateMode('idle'); setDateFeedback('') }} className="px-3 text-sm text-slate-500 border border-slate-200 rounded-xl bg-white">
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <button onClick={handleApproveDate} disabled={saving}
+                  className="flex-1 bg-sky-700 hover:bg-sky-800 disabled:opacity-40 text-white font-semibold rounded-xl py-2.5 text-sm transition active:scale-[.98]">
+                  {saving ? '…' : '✅ Confirmar fecha'}
+                </button>
+                <button onClick={() => setDateMode('changes')} disabled={saving}
+                  className="px-3 border border-amber-300 bg-white hover:bg-amber-50 text-amber-700 font-semibold rounded-xl text-sm transition">
+                  🔄
+                </button>
+                <button onClick={() => setDateMode('reject')} disabled={saving}
+                  className="px-3 border border-red-200 bg-white hover:bg-red-50 text-red-500 font-semibold rounded-xl text-sm transition">
+                  ✕
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -628,9 +683,12 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
   const allPieces = data.pieces
   const pending  = allPieces.filter(p => approvalOf(p) === 'pending')
   const approved = allPieces.filter(p => approvalOf(p) !== 'pending')
-  const briefsPending = data.briefs.filter(b => approvalOf(b) === 'pending')
+  // Exclude briefs that already have a linked piece in the review queue (same content, no duplicates)
+  const piecesBriefIds = new Set(allPieces.map(p => p.briefId).filter(Boolean))
+  const briefsPending = data.briefs.filter(b => approvalOf(b) === 'pending' && !piecesBriefIds.has(b.id))
+  const draftPending  = allPieces.filter(p => p.calendarDraft && dateApprovalOf(p) === 'pending')
 
-  const totalPending = pending.length + briefsPending.length
+  const totalPending = pending.length + briefsPending.length + draftPending.length
 
   // ── Optimistic updates ────────────────────────────────────────────────────
 
@@ -638,9 +696,23 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
     setData(prev => ({
       ...prev,
       pieces: prev.pieces.map(p =>
-        p.id === id ? { ...p, portalApproval: { action, changeType: null, feedback: feedback ?? null } } : p
+        p.id === id ? { ...p, contentApproval: { action, changeType: null, feedback: feedback ?? null }, portalApproval: { action, changeType: null, feedback: feedback ?? null } } : p
       ),
     }))
+  }
+
+  function updatePieceDateApproval(id: string, action: 'approved' | 'changes_requested', feedback?: string) {
+    setData(prev => ({
+      ...prev,
+      pieces: prev.pieces.map(p =>
+        p.id === id ? { ...p, dateApproval: { action, changeType: 'date', feedback: feedback ?? null }, ...(action === 'approved' ? { calendarDraft: false } : {}) } : p
+      ),
+    }))
+  }
+
+  function removePiece(id: string) {
+    // Optimistic remove when date is rejected
+    setData(prev => ({ ...prev, pieces: prev.pieces.map(p => p.id === id ? { ...p, calendarDraft: false, scheduledDate: null } : p) }))
   }
 
   function updateBrief(id: string, action: 'approved' | 'changes_requested', feedback?: string) {
@@ -679,6 +751,31 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ changeType: 'other', feedback }),
+    })
+  }
+
+  // ── Date approval actions ─────────────────────────────────────────────────
+
+  async function approveDraftDate(id: string) {
+    updatePieceDateApproval(id, 'approved')
+    await fetch(`${API_PATH}/portal/${token}/approve-date/${id}`, { method: 'POST' })
+  }
+
+  async function changesDraftDate(id: string, fb: string) {
+    updatePieceDateApproval(id, 'changes_requested', fb)
+    await fetch(`${API_PATH}/portal/${token}/changes-date/${id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback: fb, clearDate: false }),
+    })
+  }
+
+  async function rejectDraftDate(id: string, fb: string) {
+    removePiece(id)
+    await fetch(`${API_PATH}/portal/${token}/changes-date/${id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feedback: fb, clearDate: true }),
     })
   }
 
@@ -735,12 +832,12 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
         </div>
 
         {/* Tabs */}
-        <div className="max-w-2xl mx-auto px-4 flex gap-1 pb-0">
+        <div className="max-w-2xl mx-auto px-4 flex gap-1 pb-0 overflow-x-auto">
           {([
-            ['pendiente', `Pendiente${pending.length > 0 ? ` (${pending.length + briefsPending.length})` : ''}`],
+            ['pendiente', `Pendiente${totalPending > 0 ? ` (${totalPending})` : ''}`],
             ['aprobado', `Aprobado${approved.length > 0 ? ` (${approved.length})` : ''}`],
             ['feed', 'Feed'],
-            ...(data.briefs.length > 0 ? [['briefs', `Briefs${data.briefs.length > 0 ? ` (${data.briefs.length})` : ''}`]] : []),
+            ...(() => { const b = data.briefs.filter(x => !piecesBriefIds.has(x.id)); return b.length > 0 ? [['briefs', `Briefs (${b.length})`]] : [] })(),
           ] as [Tab, string][]).map(([t, label]) => (
             <button
               key={t}
@@ -780,49 +877,64 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
               </div>
             )}
 
-            {/* Pending pieces */}
-            {pending.length === 0 && briefsPending.length === 0 ? (
+            {/* Empty state */}
+            {pending.length === 0 && briefsPending.length === 0 && draftPending.length === 0 ? (
               <div className="text-center py-16">
                 <p className="text-4xl mb-3">🎉</p>
-                <p className="font-bold text-slate-700 text-lg">¡Todo revisado!</p>
-                <p className="text-sm text-slate-400 mt-1">No hay piezas pendientes de aprobación.</p>
+                <p className="font-bold text-slate-700 text-lg">¡Todo al día!</p>
+                <p className="text-sm text-slate-400 mt-1">No tienes nada pendiente de revisar por ahora.</p>
               </div>
             ) : (
               <>
-                {/* Posts (carrusel / post / reel / video) */}
+                {/* Unified pieces: content + date per card */}
                 {(() => {
-                  const posts = pending.filter(p => p.type !== 'story')
+                  const posts   = pending.filter(p => p.type !== 'story')
                   const stories = pending.filter(p => p.type === 'story')
                   return (
                     <>
-                      {posts.length > 0 && (
-                        <>
-                          {stories.length > 0 && <SectionDivider icon="🎬" label="Posts & Reels" count={posts.length} />}
-                          {posts.map(p => (
-                            <ReviewCard
-                              key={p.id} id={p.id} title={p.title} type={p.type}
-                              platforms={p.platforms} scheduledDate={p.scheduledDate}
-                              scheduledTime={p.scheduledTime} copy={p.copy}
-                              hashtags={p.hashtags} notes={p.publicationNotes}
-                              refsUrls={p.referencesUrls} scripts={p.scripts} approval="pending"
-                              onApprove={() => approvePiece(p.id)}
-                              onChanges={fb => changesPiece(p.id, fb)}
-                            />
-                          ))}
-                        </>
-                      )}
+                      {posts.map(p => (
+                        <ReviewCard
+                          key={p.id} id={p.id} title={p.title} type={p.type}
+                          platforms={p.platforms} scheduledDate={p.scheduledDate}
+                          scheduledTime={p.scheduledTime}
+                          copy={p.copy ?? p.copyDraft} hashtags={p.hashtags} notes={p.publicationNotes}
+                          concept={p.concept} script={p.script} technicalNotes={p.technicalNotes}
+                          refsUrls={p.referencesUrls} scripts={p.scripts}
+                          files={p.briefFiles?.length ? p.briefFiles : undefined}
+                          briefId={p.briefId ?? undefined}
+                          approval={approvalOf(p)} priorFeedback={p.contentApproval?.feedback}
+                          calendarDraft={p.calendarDraft}
+                          dateApproval={dateApprovalOf(p)}
+                          priorDateFeedback={p.dateApproval?.feedback}
+                          onApprove={() => approvePiece(p.id)}
+                          onChanges={fb => changesPiece(p.id, fb)}
+                          onApproveDate={() => approveDraftDate(p.id)}
+                          onChangesDate={fb => changesDraftDate(p.id, fb)}
+                          onRejectDate={fb => rejectDraftDate(p.id, fb)}
+                        />
+                      ))}
                       {stories.length > 0 && (
                         <>
-                          <SectionDivider icon="📱" label="Stories" count={stories.length} />
+                          {posts.length > 0 && <SectionDivider icon="📱" label="Stories" count={stories.length} />}
                           {stories.map(p => (
                             <ReviewCard
                               key={p.id} id={p.id} title={p.title} type={p.type}
                               platforms={p.platforms} scheduledDate={p.scheduledDate}
-                              scheduledTime={p.scheduledTime} copy={p.copy}
-                              hashtags={p.hashtags} notes={p.publicationNotes}
-                              refsUrls={p.referencesUrls} scripts={p.scripts} approval="pending"
+                              scheduledTime={p.scheduledTime}
+                              copy={p.copy ?? p.copyDraft} hashtags={p.hashtags} notes={p.publicationNotes}
+                              concept={p.concept} script={p.script} technicalNotes={p.technicalNotes}
+                              refsUrls={p.referencesUrls} scripts={p.scripts}
+                              files={p.briefFiles?.length ? p.briefFiles : undefined}
+                              briefId={p.briefId ?? undefined}
+                              approval={approvalOf(p)} priorFeedback={p.contentApproval?.feedback}
+                              calendarDraft={p.calendarDraft}
+                              dateApproval={dateApprovalOf(p)}
+                              priorDateFeedback={p.dateApproval?.feedback}
                               onApprove={() => approvePiece(p.id)}
                               onChanges={fb => changesPiece(p.id, fb)}
+                              onApproveDate={() => approveDraftDate(p.id)}
+                              onChangesDate={fb => changesDraftDate(p.id, fb)}
+                              onRejectDate={fb => rejectDraftDate(p.id, fb)}
                             />
                           ))}
                         </>
@@ -830,36 +942,31 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
                     </>
                   )
                 })()}
-                {briefsPending.map(b => (
-                  <ReviewCard
-                    key={b.id}
-                    id={b.id}
-                    title={b.title}
-                    type={b.type}
-                    platforms={b.platforms}
-                    concept={b.concept}
-                    script={b.script}
-                    scripts={b.scripts}
-                    copy={b.copyDraft}
-                    hashtags={b.hashtags}
-                    technicalNotes={b.technicalNotes}
-                    files={b.files}
-                    briefId={b.id}
-                    approval="pending"
-                    onApprove={() => approveBrief(b.id)}
-                    onChanges={fb => changesBrief(b.id, fb)}
-                  />
-                ))}
 
-                {/* Approve all */}
+                {/* Briefs pendientes */}
+                {briefsPending.length > 0 && (
+                  <>
+                    {pending.length > 0 && <SectionDivider icon="📋" label="Conceptos" count={briefsPending.length} />}
+                    {briefsPending.map(b => (
+                      <ReviewCard
+                        key={b.id} id={b.id} title={b.title} type={b.type}
+                        platforms={b.platforms} concept={b.concept} script={b.script}
+                        scripts={b.scripts} copy={b.copyDraft} hashtags={b.hashtags}
+                        technicalNotes={b.technicalNotes} files={b.files} briefId={b.id}
+                        approval="pending"
+                        onApprove={() => approveBrief(b.id)}
+                        onChanges={fb => changesBrief(b.id, fb)}
+                      />
+                    ))}
+                  </>
+                )}
+
+                {/* Approve all content */}
                 {(pending.length + briefsPending.length) > 1 && (
                   <div className="pt-2">
-                    <button
-                      onClick={approveAll}
-                      disabled={approvingAll}
-                      className="w-full border-2 border-[#17394f] text-[#17394f] font-bold rounded-2xl py-4 text-sm hover:bg-[#17394f]/5 disabled:opacity-40 transition active:scale-[.99]"
-                    >
-                      {approvingAll ? 'Aprobando todo…' : `✅ Aprobar todo (${pending.length + briefsPending.length} piezas)`}
+                    <button onClick={approveAll} disabled={approvingAll}
+                      className="w-full border-2 border-[#17394f] text-[#17394f] font-bold rounded-2xl py-4 text-sm hover:bg-[#17394f]/5 disabled:opacity-40 transition active:scale-[.99]">
+                      {approvingAll ? 'Aprobando todo…' : `✅ Aprobar todo el contenido (${pending.length + briefsPending.length})`}
                     </button>
                   </div>
                 )}
@@ -890,10 +997,13 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
                           <ReviewCard
                             key={p.id} id={p.id} title={p.title} type={p.type}
                             platforms={p.platforms} scheduledDate={p.scheduledDate}
-                            scheduledTime={p.scheduledTime} copy={p.copy}
+                            scheduledTime={p.scheduledTime} copy={p.copy ?? p.copyDraft}
                             hashtags={p.hashtags} notes={p.publicationNotes}
-                            refsUrls={p.referencesUrls} scripts={p.scripts} approval={approvalOf(p)}
-                            priorFeedback={p.portalApproval?.feedback}
+                            concept={p.concept} script={p.script} technicalNotes={p.technicalNotes}
+                            refsUrls={p.referencesUrls} scripts={p.scripts}
+                            files={p.briefFiles?.length ? p.briefFiles : undefined}
+                            briefId={p.briefId ?? undefined}
+                            approval={approvalOf(p)} priorFeedback={p.portalApproval?.feedback}
                             onApprove={() => approvePiece(p.id)}
                             onChanges={fb => changesPiece(p.id, fb)}
                           />
@@ -907,10 +1017,13 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
                           <ReviewCard
                             key={p.id} id={p.id} title={p.title} type={p.type}
                             platforms={p.platforms} scheduledDate={p.scheduledDate}
-                            scheduledTime={p.scheduledTime} copy={p.copy}
+                            scheduledTime={p.scheduledTime} copy={p.copy ?? p.copyDraft}
                             hashtags={p.hashtags} notes={p.publicationNotes}
-                            refsUrls={p.referencesUrls} scripts={p.scripts} approval={approvalOf(p)}
-                            priorFeedback={p.portalApproval?.feedback}
+                            concept={p.concept} script={p.script} technicalNotes={p.technicalNotes}
+                            refsUrls={p.referencesUrls} scripts={p.scripts}
+                            files={p.briefFiles?.length ? p.briefFiles : undefined}
+                            briefId={p.briefId ?? undefined}
+                            approval={approvalOf(p)} priorFeedback={p.portalApproval?.feedback}
                             onApprove={() => approvePiece(p.id)}
                             onChanges={fb => changesPiece(p.id, fb)}
                           />
@@ -941,7 +1054,7 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
                 <p className="text-slate-400">No hay briefs para revisar este mes.</p>
               </div>
             ) : (
-              data.briefs.map(b => (
+              data.briefs.filter(b => !piecesBriefIds.has(b.id)).map(b => (
                 <ReviewCard
                   key={b.id}
                   id={b.id}
@@ -965,6 +1078,7 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
             )}
           </>
         )}
+
 
         {/* Footer */}
         <p className="text-center text-xs text-slate-300 pt-4 pb-8">

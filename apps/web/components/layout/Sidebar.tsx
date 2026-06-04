@@ -9,7 +9,7 @@ import { User } from '@/types'
 import { SidebarTeamspaces } from './SidebarTeamspaces'
 import {
   CheckSquare, ListTodo, FolderKanban, Users, Building2,
-  Settings, LogOut, ChevronLeft, ChevronRight, CalendarDays, Clapperboard, SlidersHorizontal, BookOpen, HardDrive, ScrollText, BarChart3, Film, type LucideIcon,
+  Settings, LogOut, ChevronLeft, ChevronRight, CalendarDays, Clapperboard, SlidersHorizontal, BookOpen, HardDrive, ScrollText, BarChart3, Film, LayoutDashboard, Megaphone, KeyRound, type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -111,10 +111,29 @@ function SectionLabel({ label, collapsed }: { label: string; collapsed: boolean 
 
 function getNavSections(role: string, permissions: string[]) {
   if (role === 'PARTNER') {
-    return [{
-      title: 'Clientes',
-      items: [{ href: '/clients', label: 'Clientes', icon: Building2, hasBadge: false }],
-    }]
+    return [
+      {
+        title: 'Principal',
+        items: [
+          { href: '/dashboard',          label: 'Resumen',    icon: LayoutDashboard, hasBadge: false },
+          { href: '/tasks',              label: 'Mis tareas', icon: ListTodo,        hasBadge: false },
+        ],
+      },
+      {
+        title: 'Clientes',
+        items: [
+          { href: '/clients',            label: 'Clientes',   icon: Building2,       hasBadge: false },
+          { href: '/projects',           label: 'Proyectos',  icon: FolderKanban,    hasBadge: false },
+        ],
+      },
+      {
+        title: 'Actividad',
+        items: [
+          { href: '/logistica/rodajes',  label: 'Rodajes',    icon: Film,            hasBadge: false },
+          { href: '/content/calendar',   label: 'Contenido',  icon: CalendarDays,    hasBadge: false },
+        ],
+      },
+    ]
   }
 
   const isTeam = role === 'TEAM'
@@ -126,6 +145,7 @@ function getNavSections(role: string, permissions: string[]) {
     { href: '/content/scripts', label: 'Guiones', icon: ScrollText, hasBadge: false },
     { href: '/docs',   label: 'Docs',  icon: BookOpen,  hasBadge: false },
     { href: '/drive',  label: 'Drive', icon: HardDrive, hasBadge: false },
+    ...(!isTeam ? [{ href: '/meta', label: 'Meta Ads', icon: Megaphone, hasBadge: false }] : []),
   ]
 
   const sections = [
@@ -149,11 +169,14 @@ function getNavSections(role: string, permissions: string[]) {
         { href: '/admin/users', label: 'Equipo',   icon: Users,     hasBadge: false },
       ],
     }] : []),
-    ...(role === 'ADMIN' ? [{
+    ...(role === 'ADMIN' || role === 'LEAD' ? [{
       title: 'Administración',
       items: [
-        { href: '/admin/day',     label: 'Mi Día',    icon: CalendarDays, hasBadge: false },
-        { href: '/admin/reports', label: 'Reportes',  icon: BarChart3,    hasBadge: false },
+        ...(role === 'ADMIN' ? [
+          { href: '/admin/day',     label: 'Mi Día',    icon: CalendarDays, hasBadge: false },
+          { href: '/admin/reports', label: 'Reportes',  icon: BarChart3,    hasBadge: false },
+        ] : []),
+        { href: '/credenciales', label: 'Contraseñas', icon: KeyRound, hasBadge: false },
       ],
     }] : []),
   ]

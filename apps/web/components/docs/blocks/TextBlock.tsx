@@ -129,6 +129,9 @@ export function TextBlock({ block, focused, readOnly, users = [], blockRef, onUp
       if (e.key === 'i') { e.preventDefault(); document.execCommand('italic',        false); return }
       if (e.key === 'u') { e.preventDefault(); document.execCommand('underline',     false); return }
     }
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
+      if (e.key === 'X' || e.key === 'x') { e.preventDefault(); document.execCommand('strikeThrough', false); return }
+    }
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()

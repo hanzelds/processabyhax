@@ -348,11 +348,28 @@ interface EditMetaModalProps {
 }
 
 function EditMetaModal({ shoot, locations, clients, onSave, onClose }: EditMetaModalProps) {
+  // Extract existing time from shootDate if it's not midnight
+  const existingShootTime = (() => {
+    const d = new Date(shoot.shootDate)
+    return (d.getUTCHours() !== 0 || d.getUTCMinutes() !== 0)
+      ? `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+      : ''
+  })()
+  const existingEndTime = (() => {
+    if (!shoot.endDate) return ''
+    const d = new Date(shoot.endDate)
+    return (d.getUTCHours() !== 0 || d.getUTCMinutes() !== 0)
+      ? `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+      : ''
+  })()
+
   const [form, setForm] = useState({
     title:      shoot.title,
     status:     shoot.status,
     shootDate:  shoot.shootDate.slice(0, 10),
+    shootTime:  existingShootTime,
     endDate:    shoot.endDate?.slice(0, 10) ?? '',
+    endTime:    existingEndTime,
     locationId: shoot.locationId ?? '',
     clientId:   shoot.clientId   ?? '',
     notes:      shoot.notes ?? '',
@@ -363,9 +380,17 @@ function EditMetaModal({ shoot, locations, clients, onSave, onClose }: EditMetaM
     if (!form.title) return
     setSaving(true)
     try {
+      const shootDateTime = form.shootTime
+        ? `${form.shootDate}T${form.shootTime}:00`
+        : form.shootDate
+      const endDateTime = form.endDate
+        ? form.endTime ? `${form.endDate}T${form.endTime}:00` : form.endDate
+        : undefined
       const saved = await api.patch<Shoot>(`/api/shoots/${shoot.id}`, {
-        ...form,
-        endDate:    form.endDate    || undefined,
+        title:      form.title,
+        status:     form.status,
+        shootDate:  shootDateTime,
+        endDate:    endDateTime,
         locationId: form.locationId || undefined,
         clientId:   form.clientId   || undefined,
         notes:      form.notes      || undefined,
@@ -397,10 +422,12 @@ function EditMetaModal({ shoot, locations, clients, onSave, onClose }: EditMetaM
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1.5">Fecha inicio</label>
               <input type="date" value={form.shootDate} onChange={e => setForm(f => ({ ...f, shootDate: e.target.value }))} className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-[#17394f]" />
+              <input type="time" value={form.shootTime} onChange={e => setForm(f => ({ ...f, shootTime: e.target.value }))} className="w-full mt-1.5 text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-[#17394f]" />
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1.5">Fecha fin</label>
               <input type="date" value={form.endDate} min={form.shootDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-[#17394f]" />
+              <input type="time" value={form.endTime} onChange={e => setForm(f => ({ ...f, endTime: e.target.value }))} className="w-full mt-1.5 text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-[#17394f]" />
             </div>
           </div>
           <div>

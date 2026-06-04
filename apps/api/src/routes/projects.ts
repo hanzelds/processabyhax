@@ -55,6 +55,36 @@ projectsRouter.get('/', isAuth, async (req, res) => {
 
   const settings = await getSettings()
   const teamSeeAll = settings.allow_team_see_all_projects === 'true'
+
+  // PARTNER sees all projects for their commercial partner clients
+  if (user!.role === 'PARTNER') {
+    const { clientId, status: statusFilter } = req.query
+    const where: Record<string, unknown> = { client: { commercialPartner: true } }
+    if (clientId) where.clientId = clientId as string
+    if (statusFilter) where.status = statusFilter as ProjectStatus
+    const projects = await prisma.project.findMany({
+      where,
+      orderBy: { estimatedClose: 'asc' },
+      include: {
+        client: { select: { id: true, name: true, status: true } },
+        clientService: { select: { id: true, name: true, service: { select: { id: true, name: true, icon: true, color: true } } } },
+        members: { include: { user: { select: { id: true, name: true, area: true } } } },
+        _count: { select: { tasks: true } },
+      },
+    })
+    const result = await Promise.all(projects.map(async p => {
+      const [total, completed, overdue, blocked] = await Promise.all([
+        prisma.task.count({ where: { projectId: p.id } }),
+        prisma.task.count({ where: { projectId: p.id, status: 'COMPLETED' } }),
+        prisma.task.count({ where: { projectId: p.id, status: { not: 'COMPLETED' }, dueDate: { lt: new Date() } } }),
+        prisma.task.count({ where: { projectId: p.id, status: 'BLOCKED' } }),
+      ])
+      const progress = total > 0 ? Math.round((completed / total) * 100) : 0
+      return { ...p, metrics: { total, completed, overdue, blocked, progress } }
+    }))
+    res.json(result); return
+  }
+
   const baseWhere = (user!.role === 'ADMIN' || user!.role === 'LEAD' || teamSeeAll)
     ? {}
     : { tasks: { some: { assignees: { some: { userId: user!.userId } } } } }

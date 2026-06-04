@@ -11,10 +11,10 @@ const PIECE_SELECT = {
   clientId: true,
   copy: true, hashtags: true, referencesUrls: true, copyStatus: true,
   publicationNotes: true, scheduledDate: true, scheduledTime: true,
-  publishedAt: true, briefId: true, createdAt: true, updatedAt: true,
+  publishedAt: true, briefId: true, calendarDraft: true, createdAt: true, updatedAt: true,
   client: { select: { id: true, name: true, color: true } },
   createdBy: { select: { id: true, name: true } },
-  brief: { select: { id: true, title: true, status: true } },
+  brief: { select: { id: true, title: true, status: true, copyDraft: true, hashtags: true } },
 }
 
 async function logPieceHistory(pieceId: string, actorId: string, eventType: string, description: string, meta?: object) {
@@ -43,6 +43,10 @@ contentCalendarRouter.get('/calendar', isAuth, async (req, res) => {
     status: { notIn: ['cancelado'] },
   }
   if (clientId) where.clientId = clientId as string
+  // PARTNER only sees content for their commercial partner clients
+  if (req.user!.role === 'PARTNER') {
+    where.client = { commercialPartner: true }
+  }
 
   const pieces = await prisma.contentPiece.findMany({
     where,
@@ -60,6 +64,9 @@ contentCalendarRouter.get('/inbox', isAuth, async (req, res) => {
     status: { in: ['listo', 'en_revision'] },
   }
   if (clientId) where.clientId = clientId as string
+  if (req.user!.role === 'PARTNER') {
+    where.client = { commercialPartner: true }
+  }
 
   const pieces = await prisma.contentPiece.findMany({
     where,
@@ -77,6 +84,9 @@ contentCalendarRouter.get('/pieces', isAuth, async (req, res) => {
   if (status)    where.status    = status as ContentPieceStatus
   if (type)      where.type      = type as ContentType
   if (copyStatus) where.copyStatus = copyStatus as CopyStatus
+  if (req.user!.role === 'PARTNER') {
+    where.client = { commercialPartner: true }
+  }
 
   const pieces = await prisma.contentPiece.findMany({
     where,
@@ -102,11 +112,13 @@ contentCalendarRouter.get('/pieces/:id', isAuth, async (req, res) => {
 // ── POST /pieces — create piece directly ──────────────────────────────────────
 contentCalendarRouter.post('/pieces', requirePermission('content.write'), async (req, res) => {
   const { title, clientId, type, platforms, copy, hashtags, referencesUrls,
-          copyStatus, publicationNotes, scheduledDate, scheduledTime } = req.body
+          copyStatus, publicationNotes, scheduledDate, scheduledTime, briefId, calendarDraft } = req.body
 
   if (!title || !clientId || !type || !platforms?.length) {
     res.status(400).json({ error: 'Título, cliente, tipo y plataforma son requeridos' }); return
   }
+
+  const isDraft = scheduledDate ? (calendarDraft ?? false) : false
 
   const piece = await prisma.contentPiece.create({
     data: {
@@ -118,16 +130,21 @@ contentCalendarRouter.post('/pieces', requirePermission('content.write'), async 
       copyStatus: (copyStatus as CopyStatus) || 'pendiente',
       publicationNotes: publicationNotes || null,
       createdById: req.user!.userId,
+      briefId: briefId || null,
       ...(scheduledDate ? {
         scheduledDate: new Date(scheduledDate),
         scheduledTime: scheduledTime || null,
-        status: 'programado' as const,
+        calendarDraft: isDraft,
+        status: isDraft ? 'listo' : 'programado' as const,
       } : {}),
     },
     select: PIECE_SELECT,
   })
 
-  await logPieceHistory(piece.id, req.user!.userId, 'piece_created', `Pieza "${piece.title}" creada`)
+  await logPieceHistory(piece.id, req.user!.userId, 'piece_created',
+    isDraft
+      ? `Pieza "${piece.title}" creada como borrador de fecha para el cliente`
+      : `Pieza "${piece.title}" creada`)
 
   res.status(201).json(piece)
 })
@@ -160,33 +177,43 @@ contentCalendarRouter.patch('/pieces/:id', requirePermission('content.write'), a
 
 // ── PATCH /pieces/:id/schedule ────────────────────────────────────────────────
 contentCalendarRouter.patch('/pieces/:id/schedule', requirePermission('content.write'), async (req, res) => {
-  const { scheduledDate, scheduledTime } = req.body
+  const { scheduledDate, scheduledTime, calendarDraft } = req.body
 
   const prev = await prisma.contentPiece.findUnique({
     where: { id: req.params.id },
-    select: { scheduledDate: true, status: true, title: true, client: { select: { name: true } } },
+    select: { scheduledDate: true, status: true, title: true, calendarDraft: true, client: { select: { name: true } } },
   })
   if (!prev) { res.status(404).json({ error: 'Pieza no encontrada' }); return }
 
+  // calendarDraft=true requires a date
+  if (calendarDraft && !scheduledDate) {
+    res.status(400).json({ error: 'Asigna una fecha para enviar como borrador al cliente' }); return
+  }
+
   const isReschedule = !!prev.scheduledDate
+  const isDraft = scheduledDate ? (calendarDraft ?? false) : false
 
   const piece = await prisma.contentPiece.update({
     where: { id: req.params.id },
     data: {
       scheduledDate: scheduledDate ? new Date(scheduledDate) : null,
       scheduledTime: scheduledTime || null,
-      status: scheduledDate ? 'programado' : 'listo',
+      calendarDraft: isDraft,
+      // Draft = pending client confirmation (listo). Confirmed = programado.
+      status: scheduledDate ? (isDraft ? 'listo' : 'programado') : 'listo',
     },
     select: PIECE_SELECT,
   })
 
-  await logPieceHistory(piece.id, req.user!.userId,
-    isReschedule ? 'rescheduled' : 'scheduled',
+  const historyLabel = isDraft ? 'draft_sent_to_client' : (isReschedule ? 'rescheduled' : 'scheduled')
+  await logPieceHistory(piece.id, req.user!.userId, historyLabel,
     scheduledDate
-      ? `Programada para ${scheduledDate}${scheduledTime ? ` a las ${scheduledTime}` : ''}`
+      ? isDraft
+        ? `Enviada al cliente como borrador de fecha: ${scheduledDate}${scheduledTime ? ` a las ${scheduledTime}` : ''}`
+        : `Programada para ${scheduledDate}${scheduledTime ? ` a las ${scheduledTime}` : ''}`
       : 'Quitada del calendario (sin fecha)')
 
-  if (scheduledDate) {
+  if (scheduledDate && !isDraft) {
     const adminEmails = await getAdminLeadEmails()
     sendPieceScheduledEmail({
       adminEmails,

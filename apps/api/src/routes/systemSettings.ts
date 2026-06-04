@@ -3,7 +3,6 @@ import { prisma } from '../lib/prisma'
 import { isAdmin } from '../middleware/auth'
 import { ALL_PERMISSIONS, PERMISSION_LABEL, PERMISSION_MODULE, ROLE_DEFAULTS } from '../lib/permissions'
 import { invalidateSettingsCache } from '../lib/settings'
-import { isWhatsAppConfigured } from '../lib/whatsapp'
 
 export const systemSettingsRouter = Router()
 systemSettingsRouter.use(isAdmin)
@@ -68,14 +67,6 @@ export const SETTING_DEFAULTS: Record<string, string> = {
   email_portal_expiry:             'true',
   email_portal_all_approved:       'true',
 
-  // ── WhatsApp ──────────────────────────────────────────────────────────────
-  whatsapp_enabled:                'false',
-  whatsapp_notify_task_assigned:   'true',
-  whatsapp_notify_task_status:     'true',
-  whatsapp_notify_due_soon:        'true',
-  whatsapp_notify_overdue:         'true',
-  whatsapp_reminders_time:         '08:00',
-
   // ── Sistema ───────────────────────────────────────────────────────────────
   maintenance_mode:                'false',
   activity_log_enabled:            'true',
@@ -95,7 +86,6 @@ systemSettingsRouter.get('/settings', async (_req, res) => {
   const settings = await getSettings()
   // Añadir indicadores de configuración de env vars (readonly, no se guardan en DB)
   const meta = {
-    whatsapp_token_configured: isWhatsAppConfigured(),
     email_resend_configured: !!process.env.RESEND_API_KEY,
   }
   res.json({ ...settings, ...meta })

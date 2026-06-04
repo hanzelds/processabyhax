@@ -264,7 +264,7 @@ usersRouter.post('/', isAdmin, async (req, res) => {
 // ── PUT /users/:id (admin edits full profile) ─────────────────────────────────
 
 usersRouter.put('/:id', isAdmin, async (req, res) => {
-  const { name, email, role, area, joinedAt, bio, phone } = req.body
+  const { name, email, role, area, joinedAt, bio } = req.body
   const data: Record<string, unknown> = {}
   if (name)              data.name = name
   if (email)             data.email = email
@@ -272,12 +272,11 @@ usersRouter.put('/:id', isAdmin, async (req, res) => {
   if (area !== undefined) data.area = area || null
   if (joinedAt !== undefined) data.joinedAt = joinedAt ? new Date(joinedAt) : null
   if (bio !== undefined)  data.bio = bio || null
-  if (phone !== undefined) data.phone = phone || null
 
   const user = await prisma.user.update({
     where: { id: req.params.id },
     data,
-    select: { id: true, name: true, email: true, role: true, area: true, status: true, bio: true, phone: true, joinedAt: true, createdAt: true },
+    select: { id: true, name: true, email: true, role: true, area: true, status: true, bio: true, joinedAt: true, createdAt: true },
   })
   res.json(user)
 })
@@ -289,12 +288,10 @@ usersRouter.patch('/:id', isAuth, async (req, res) => {
   const isOwn = userId === req.params.id
   if (!isOwn && role !== 'ADMIN') { res.status(403).json({ error: 'Sin permiso' }); return }
 
-  const { bio, phone, name, whatsappNotif } = req.body
+  const { bio, name } = req.body
   const data: Record<string, unknown> = {}
-  if (name)                       data.name          = name
-  if (bio !== undefined)          data.bio           = bio || null
-  if (phone !== undefined)        data.phone         = phone || null
-  if (whatsappNotif !== undefined) data.whatsappNotif = Boolean(whatsappNotif)
+  if (name)              data.name = name
+  if (bio !== undefined) data.bio  = bio || null
 
   // Admin can also patch role/area/email/status via this route
   if (role === 'ADMIN') {
@@ -308,7 +305,7 @@ usersRouter.patch('/:id', isAuth, async (req, res) => {
   const user = await prisma.user.update({
     where: { id: req.params.id },
     data,
-    select: { id: true, name: true, email: true, role: true, area: true, status: true, bio: true, phone: true, whatsappNotif: true, joinedAt: true, avatarUrl: true },
+    select: { id: true, name: true, email: true, role: true, area: true, status: true, bio: true, joinedAt: true, avatarUrl: true },
   })
   res.json(user)
 })

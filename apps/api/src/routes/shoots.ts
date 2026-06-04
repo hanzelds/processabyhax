@@ -52,6 +52,9 @@ shootsRouter.get('/', async (req: Request, res: Response) => {
   // TEAM users only see shoots where they are in crew
   if (user.role === 'TEAM') {
     where.crew = { some: { userId: user.userId } }
+  } else if (user.role === 'PARTNER') {
+    // PARTNER only sees shoots for their commercial partner clients
+    where.client = { commercialPartner: true }
   }
   if (status)    where.status    = status
   if (projectId) where.projectId = projectId
@@ -183,12 +186,12 @@ shootsRouter.put('/:id/gear', isAdminOrLead, async (req: Request, res: Response)
   const { gear } = req.body as { gear: { gearItemId: string; notes?: string }[] }
   if (!Array.isArray(gear)) return res.status(400).json({ error: 'gear debe ser un array' })
 
-  await prisma.$transaction([
-    prisma.shootGear.deleteMany({ where: { shootId: req.params.id } }),
-    ...gear.map(g => prisma.shootGear.create({
-      data: { shootId: req.params.id, gearItemId: g.gearItemId, notes: g.notes || null },
-    })),
-  ])
+  await prisma.$transaction(async tx => {
+    await tx.shootGear.deleteMany({ where: { shootId: req.params.id } })
+    for (const g of gear) {
+      await tx.shootGear.create({ data: { shootId: req.params.id, gearItemId: g.gearItemId, notes: g.notes || null } })
+    }
+  })
 
   const shoot = await prisma.shoot.findUnique({ where: { id: req.params.id }, select: SHOOT_DETAIL_SELECT })
   res.json(shoot)

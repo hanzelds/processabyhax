@@ -86,22 +86,27 @@ dayplanRouter.post('/blocks', isAuth, async (req, res) => {
     res.status(400).json({ error: 'date, startTime y endTime son requeridos' }); return
   }
 
-  const block = await prisma.workBlock.create({
-    data: {
-      userId,
-      date:          new Date(date + 'T12:00:00.000Z'),
-      startTime,
-      endTime,
-      title:         title         || null,
-      notes:         notes         || null,
-      color:         color         || null,
-      taskId:        taskId        || null,
-      shootId:       shootId       || null,
-      contentPieceId: contentPieceId || null,
-      briefId:       briefId       || null,
-    },
-  })
-  res.status(201).json(block)
+  try {
+    const block = await prisma.workBlock.create({
+      data: {
+        userId,
+        date:          new Date(date + 'T12:00:00.000Z'),
+        startTime,
+        endTime,
+        title:         title         || null,
+        notes:         notes         || null,
+        color:         color         || null,
+        taskId:        taskId        || null,
+        shootId:       shootId       || null,
+        contentPieceId: contentPieceId || null,
+        briefId:       briefId       || null,
+      },
+    })
+    res.status(201).json(block)
+  } catch (e) {
+    console.error('[DayPlan] Error creando bloque:', e)
+    res.status(500).json({ error: 'Error al crear el bloque' })
+  }
 })
 
 // ── PATCH /blocks/:id — update work block ────────────────────────────────────
@@ -124,8 +129,13 @@ dayplanRouter.patch('/blocks/:id', isAuth, async (req, res) => {
   if (contentPieceId !== undefined) data.contentPieceId = contentPieceId || null
   if (briefId !== undefined)        data.briefId        = briefId || null
 
-  const block = await prisma.workBlock.update({ where: { id: req.params.id }, data })
-  res.json(block)
+  try {
+    const block = await prisma.workBlock.update({ where: { id: req.params.id }, data })
+    res.json(block)
+  } catch (e) {
+    console.error('[DayPlan] Error actualizando bloque:', e)
+    res.status(500).json({ error: 'Error al actualizar el bloque' })
+  }
 })
 
 // ── DELETE /blocks/:id — delete work block ───────────────────────────────────
@@ -135,8 +145,33 @@ dayplanRouter.delete('/blocks/:id', isAuth, async (req, res) => {
   if (!existing || existing.userId !== userId) {
     res.status(404).json({ error: 'Bloque no encontrado' }); return
   }
-  await prisma.workBlock.delete({ where: { id: req.params.id } })
-  res.json({ ok: true })
+  try {
+    await prisma.workBlock.delete({ where: { id: req.params.id } })
+    res.json({ ok: true })
+  } catch (e) {
+    console.error('[DayPlan] Error eliminando bloque:', e)
+    res.status(500).json({ error: 'Error al eliminar el bloque' })
+  }
+})
+
+// ── GET /my-tasks — all assigned incomplete tasks for the task picker ─────────
+dayplanRouter.get('/my-tasks', isAuth, async (req, res) => {
+  const userId = req.user!.userId
+  const q = (req.query.q as string | undefined)?.trim()
+
+  const tasks = await prisma.task.findMany({
+    where: {
+      assignees: { some: { userId } },
+      status: { notIn: ['COMPLETED'] },
+      ...(q ? { title: { contains: q, mode: 'insensitive' } } : {}),
+    },
+    include: {
+      project: { select: { id: true, name: true, client: { select: { id: true, name: true, color: true } } } },
+    },
+    orderBy: [{ dueDate: 'asc' }, { createdAt: 'desc' }],
+    take: 80,
+  })
+  res.json(tasks)
 })
 
 // ── PATCH /tasks/:id/status — change task status (bidirectional) ─────────────

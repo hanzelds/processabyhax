@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { AdminDashboard } from '@/components/dashboard/AdminDashboard'
 import { TeamDashboard } from '@/components/dashboard/TeamDashboard'
 import { LeadDashboard } from '@/components/dashboard/LeadDashboard'
+import { PartnerDashboard } from '@/components/dashboard/PartnerDashboard'
 import {
   AdminKPIs,
   AdminOverview,
@@ -49,7 +50,11 @@ export default async function DashboardPage() {
   const token = cookieStore.get('token')?.value || ''
 
   if (!user) return null
-  if (user.role === 'PARTNER') redirect('/clients')
+
+  // ── PARTNER ────────────────────────────────────────────────────────────────
+  if (user.role === 'PARTNER') {
+    return <PartnerDashboard user={user} />
+  }
 
   // ── ADMIN ──────────────────────────────────────────────────────────────────
   if (user.role === 'ADMIN') {

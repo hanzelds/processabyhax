@@ -37,13 +37,15 @@ export function PieceModal({ piece, defaultDate, clients, isAdmin, onUpdate, onC
   const [clientId, setClientId]   = useState(piece?.clientId ?? '')
   const [type, setType]           = useState<ContentType>(piece?.type ?? 'reel')
   const [platforms, setPlatforms] = useState<ContentPlatform[]>(piece?.platforms ?? [])
-  const [copy, setCopy]           = useState(piece?.copy ?? '')
-  const [hashtags, setHashtags]   = useState(piece?.hashtags ?? '')
+  // Fall back to brief's copyDraft/hashtags if the piece doesn't have its own
+  const [copy, setCopy]           = useState(piece?.copy ?? piece?.brief?.copyDraft ?? '')
+  const [hashtags, setHashtags]   = useState(piece?.hashtags ?? piece?.brief?.hashtags ?? '')
   const [publicationNotes, setPublicationNotes] = useState(piece?.publicationNotes ?? '')
   const [copyStatus, setCopyStatus] = useState<CopyStatus>(piece?.copyStatus ?? 'pendiente')
   const [status, setStatus]       = useState<ContentPieceStatus>(piece?.status ?? 'listo')
   const [scheduledDate, setScheduledDate] = useState(piece?.scheduledDate?.split('T')[0] ?? defaultDate ?? '')
   const [scheduledTime, setScheduledTime] = useState(piece?.scheduledTime ?? '')
+  const [calendarDraft, setCalendarDraft] = useState(piece?.calendarDraft ?? false)
 
   const [editing, setEditing]     = useState(isNew)
   const [saving, setSaving]       = useState(false)
@@ -83,8 +85,9 @@ export function PieceModal({ piece, defaultDate, clients, isAdmin, onUpdate, onC
     setScheduling(true)
     try {
       const updated = await api.patch<ContentPiece>(`/api/content/pieces/${piece.id}/schedule`, {
-        scheduledDate, scheduledTime: scheduledTime || null,
+        scheduledDate, scheduledTime: scheduledTime || null, calendarDraft,
       })
+      setCalendarDraft(updated.calendarDraft ?? false)
       onUpdate(updated)
     } finally { setScheduling(false) }
   }
@@ -92,8 +95,9 @@ export function PieceModal({ piece, defaultDate, clients, isAdmin, onUpdate, onC
   async function handleUnschedule() {
     if (!piece) return
     const updated = await api.patch<ContentPiece>(`/api/content/pieces/${piece.id}/schedule`, {
-      scheduledDate: null,
+      scheduledDate: null, calendarDraft: false,
     })
+    setCalendarDraft(false)
     onUpdate(updated)
   }
 
@@ -258,7 +262,14 @@ export function PieceModal({ piece, defaultDate, clients, isAdmin, onUpdate, onC
 
               {/* Scheduling */}
               <div className="bg-slate-50 rounded-xl p-4 space-y-3">
-                <p className={LABEL}>Programación</p>
+                <div className="flex items-center justify-between">
+                  <p className={LABEL}>Programación</p>
+                  {piece?.calendarDraft && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                      ⏳ Borrador cliente
+                    </span>
+                  )}
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-slate-500 mb-1 block">Fecha</label>
@@ -269,9 +280,30 @@ export function PieceModal({ piece, defaultDate, clients, isAdmin, onUpdate, onC
                     <input type="time" className={INPUT} value={scheduledTime} onChange={e => setScheduledTime(e.target.value)} />
                   </div>
                 </div>
+                {isAdmin && scheduledDate && (
+                  <label className="flex items-start gap-2.5 cursor-pointer group">
+                    <div className="relative shrink-0 mt-0.5">
+                      <input
+                        type="checkbox"
+                        checked={calendarDraft}
+                        onChange={e => setCalendarDraft(e.target.checked)}
+                        className="sr-only"
+                      />
+                      <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+                        calendarDraft ? 'bg-amber-500 border-amber-500' : 'border-slate-300 group-hover:border-amber-400'
+                      }`}>
+                        {calendarDraft && <span className="text-white text-[10px] leading-none font-bold">✓</span>}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium text-slate-700">Enviar al cliente como borrador de fecha</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">El cliente verá esta fecha en su portal y deberá aprobarla antes de confirmarse.</p>
+                    </div>
+                  </label>
+                )}
                 <div className="flex gap-2">
                   <button onClick={handleSchedule} disabled={scheduling || !scheduledDate} className="flex-1 bg-[#17394f] text-white text-sm font-medium rounded-lg py-2 disabled:opacity-50 hover:bg-[#17394f]/90">
-                    {scheduling ? 'Guardando…' : scheduledDate ? 'Actualizar fecha' : 'Asignar fecha'}
+                    {scheduling ? 'Guardando…' : calendarDraft ? 'Enviar borrador al cliente' : (scheduledDate ? 'Actualizar fecha' : 'Asignar fecha')}
                   </button>
                   {piece?.scheduledDate && (
                     <button onClick={handleUnschedule} className="px-3 py-2 border border-slate-200 text-slate-500 text-sm rounded-lg hover:bg-slate-50">

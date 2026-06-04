@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { CheckSquare, FolderKanban, Building2, Settings } from 'lucide-react'
+import { CheckSquare, FolderKanban, Building2, Settings, LayoutDashboard, Film, CalendarDays } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface NavItem {
@@ -13,7 +13,12 @@ interface NavItem {
 
 function getItems(role: string): NavItem[] {
   if (role === 'PARTNER') {
-    return [{ href: '/clients', label: 'Clientes', icon: Building2 }]
+    return [
+      { href: '/dashboard',         label: 'Resumen',   icon: LayoutDashboard },
+      { href: '/clients',           label: 'Clientes',  icon: Building2 },
+      { href: '/projects',          label: 'Proyectos', icon: FolderKanban },
+      { href: '/content/calendar',  label: 'Contenido', icon: CalendarDays },
+    ]
   }
   return [
     { href: '/dashboard',   label: 'Tareas',    icon: CheckSquare  },

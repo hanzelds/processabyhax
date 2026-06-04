@@ -101,6 +101,10 @@ export const ROLE_DEFAULTS: Record<string, Permission[]> = {
   ],
   PARTNER: [
     'clients.read',
+    'dashboard.personal',
+    'tasks.read_assigned', 'tasks.move_own',
+    'projects.read_assigned',
+    'content.calendar',
   ],
 }
 

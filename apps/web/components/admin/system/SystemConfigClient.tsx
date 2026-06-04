@@ -14,7 +14,7 @@ import { Service } from '@/types'
 
 // ── Shared primitives ─────────────────────────────────────────────────────────
 
-type Tab = 'general' | 'seguridad' | 'usuarios' | 'proyectos' | 'tareas' | 'contenido' | 'email' | 'whatsapp' | 'sistema' | 'servicios'
+type Tab = 'general' | 'seguridad' | 'usuarios' | 'proyectos' | 'tareas' | 'contenido' | 'email' | 'sistema' | 'servicios'
 
 const TABS: { id: Tab; label: string; Icon: typeof Settings }[] = [
   { id: 'general',    label: 'General',     Icon: Settings      },
@@ -25,7 +25,6 @@ const TABS: { id: Tab; label: string; Icon: typeof Settings }[] = [
   { id: 'contenido',  label: 'Contenido',   Icon: Clapperboard  },
   { id: 'servicios',  label: 'Servicios',   Icon: Briefcase     },
   { id: 'email',      label: 'Email',       Icon: Mail          },
-  { id: 'whatsapp',   label: 'WhatsApp',    Icon: MessageCircle },
   { id: 'sistema',    label: 'Sistema',     Icon: BarChart3     },
 ]
 
@@ -610,103 +609,6 @@ function EmailTab({ settings, onSave }: { settings: SystemSettings; onSave: (u: 
   )
 }
 
-// ── WhatsApp Tab ──────────────────────────────────────────────────────────────
-
-const WA_ITEMS = [
-  { key: 'whatsapp_notify_task_assigned', label: 'Tarea asignada',    description: 'Avisa al asignado cuando recibe una nueva tarea' },
-  { key: 'whatsapp_notify_task_status',   label: 'Cambio de estado',  description: 'Notifica al asignado cuando alguien cambia el estado de su tarea' },
-  { key: 'whatsapp_notify_due_soon',      label: 'Recordatorio 24h',  description: 'Avisa al asignado un día antes del vencimiento' },
-  { key: 'whatsapp_notify_overdue',       label: 'Tarea vencida',     description: 'Alerta al asignado el día siguiente al vencimiento' },
-]
-
-function WhatsAppTab({ settings, onSave }: { settings: SystemSettings; onSave: (u: Partial<SystemSettings>) => Promise<void> }) {
-  const configured = settings.whatsapp_token_configured === 'true' || settings.whatsapp_token_configured === true as unknown as string
-  const [vals, setVals] = useState<Record<string, boolean>>(() => {
-    const obj: Record<string, boolean> = { whatsapp_enabled: settings.whatsapp_enabled === 'true' }
-    WA_ITEMS.forEach(i => { obj[i.key] = settings[i.key] !== 'false' })
-    return obj
-  })
-  const { saving, toast, save } = useForm(settings, onSave)
-  const globalOn = vals.whatsapp_enabled
-
-  function set(key: string, v: boolean) { setVals(prev => ({ ...prev, [key]: v })) }
-
-  return (
-    <div className="space-y-4">
-      <Section title="Estado de la integración" description="Las credenciales se configuran como variables de entorno">
-        <div className={cn(
-          'flex items-center gap-3 rounded-xl px-4 py-3',
-          configured ? 'bg-emerald-50 border border-emerald-200' : 'bg-amber-50 border border-amber-200'
-        )}>
-          {configured
-            ? <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0" />
-            : <AlertCircle className="w-5 h-5 text-amber-500 shrink-0" />}
-          <div>
-            <p className={cn('text-sm font-medium', configured ? 'text-emerald-700' : 'text-amber-700')}>
-              {configured ? 'Token y número de teléfono configurados' : 'Token o número de teléfono no configurados'}
-            </p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Requiere: <code className="font-mono bg-white/60 px-1 rounded">WHATSAPP_TOKEN</code> y <code className="font-mono bg-white/60 px-1 rounded">WHATSAPP_PHONE_NUMBER_ID</code>
-            </p>
-          </div>
-        </div>
-        {!configured && (
-          <div className="text-xs text-slate-500 bg-slate-50 rounded-xl p-4 space-y-1.5">
-            <p className="font-semibold text-slate-600">Cómo configurar:</p>
-            <p>1. Crea una app en <strong>developers.facebook.com</strong> → producto WhatsApp Business</p>
-            <p>2. Obtén el <strong>Access Token</strong> permanente y el <strong>Phone Number ID</strong></p>
-            <p>3. Agrégalos a <code className="font-mono bg-white px-1 rounded">apps/api/.env</code>:</p>
-            <pre className="bg-white rounded-lg p-2 font-mono border border-slate-200 mt-1 overflow-x-auto">
-              {`WHATSAPP_TOKEN=EAAxxxxxxx\nWHATSAPP_PHONE_NUMBER_ID=12345678\nWHATSAPP_API_VERSION=v19.0`}
-            </pre>
-            <p>4. Reinicia: <code className="font-mono bg-white px-1 rounded">pm2 restart processa-api</code></p>
-          </div>
-        )}
-      </Section>
-
-      <Section title="Canal de WhatsApp">
-        <Toggle
-          checked={vals.whatsapp_enabled}
-          onChange={v => set('whatsapp_enabled', v)}
-          label="Notificaciones por WhatsApp activas"
-          description="Desactivar silencia todos los mensajes de WhatsApp"
-        />
-        {!configured && globalOn && (
-          <div className="flex items-center gap-2 text-xs text-amber-600 bg-amber-50 rounded-xl px-3 py-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            WhatsApp habilitado pero las credenciales no están configuradas. No se enviarán mensajes.
-          </div>
-        )}
-      </Section>
-
-      <Section title="Tipos de notificación">
-        <div className={cn('divide-y divide-slate-100', !globalOn && 'opacity-40 pointer-events-none')}>
-          {WA_ITEMS.map(item => (
-            <Toggle key={item.key} checked={vals[item.key] ?? true} onChange={v => set(item.key, v)} label={item.label} description={item.description} />
-          ))}
-        </div>
-      </Section>
-
-      <Section title="Recordatorios automáticos">
-        <div className="flex items-center gap-3 text-sm text-slate-600 bg-slate-50 rounded-xl px-4 py-3">
-          <Zap className="w-4 h-4 text-green-500 shrink-0" />
-          <span>Los recordatorios (24h antes y vencidas) se envían a las <strong>07:00</strong> diariamente. Configuración de días en la pestaña <strong>Contenido</strong>.</span>
-        </div>
-        <div className="flex items-start gap-2 text-xs text-slate-500 bg-slate-50 rounded-xl px-3 py-2">
-          <Info className="w-4 h-4 shrink-0 mt-0.5 text-slate-400" />
-          Cada usuario puede desactivar su propio WhatsApp desde <strong>Configuración → Notificaciones</strong>. El teléfono debe estar en formato internacional (+1 809...).
-        </div>
-      </Section>
-
-      <SaveRow toast={toast} saving={saving} onSave={() => {
-        const updates: Record<string, string> = {}
-        Object.entries(vals).forEach(([k, v]) => { updates[k] = v ? 'true' : 'false' })
-        save(updates)
-      }} />
-    </div>
-  )
-}
-
 // ── Sistema Tab ───────────────────────────────────────────────────────────────
 
 const MODULE_ICON: Record<string, typeof Shield> = {
@@ -1087,7 +989,6 @@ export function SystemConfigClient({ initialSettings, permissions, stats }: Prop
       {activeTab === 'tareas'    && <TareasTab     settings={settings} onSave={handleSave} />}
       {activeTab === 'contenido' && <ContenidoTab  settings={settings} onSave={handleSave} />}
       {activeTab === 'email'     && <EmailTab      settings={settings} onSave={handleSave} />}
-      {activeTab === 'whatsapp'  && <WhatsAppTab   settings={settings} onSave={handleSave} />}
       {activeTab === 'sistema'   && <SistemaTab    stats={stats} permissions={permissions} />}
       {activeTab === 'servicios' && <ServiciosTab />}
     </div>

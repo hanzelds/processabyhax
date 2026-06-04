@@ -41,12 +41,14 @@ interface NuevoRodajeModalProps {
 
 function NuevoRodajeModal({ onSave, onClose, clients }: NuevoRodajeModalProps) {
   const [form, setForm] = useState({
-    title:     '',
-    shootDate: new Date().toISOString().slice(0, 10),
-    endDate:   '',
-    status:    'DRAFT',
-    clientId:  '',
-    notes:     '',
+    title:      '',
+    shootDate:  new Date().toISOString().slice(0, 10),
+    shootTime:  '',
+    endDate:    '',
+    endTime:    '',
+    status:     'DRAFT',
+    clientId:   '',
+    notes:      '',
   })
   const [saving, setSaving] = useState(false)
 
@@ -54,10 +56,16 @@ function NuevoRodajeModal({ onSave, onClose, clients }: NuevoRodajeModalProps) {
     if (!form.title || !form.shootDate) return
     setSaving(true)
     try {
+      const shootDateTime = form.shootTime
+        ? `${form.shootDate}T${form.shootTime}:00`
+        : form.shootDate
+      const endDateTime = form.endDate
+        ? form.endTime ? `${form.endDate}T${form.endTime}:00` : form.endDate
+        : undefined
       const payload = {
         title:     form.title,
-        shootDate: form.shootDate,
-        endDate:   form.endDate   || undefined,
+        shootDate: shootDateTime,
+        endDate:   endDateTime,
         status:    form.status,
         clientId:  form.clientId  || undefined,
         notes:     form.notes     || undefined,
@@ -90,10 +98,12 @@ function NuevoRodajeModal({ onSave, onClose, clients }: NuevoRodajeModalProps) {
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1.5">Fecha de inicio *</label>
               <input type="date" value={form.shootDate} onChange={e => setForm(f => ({ ...f, shootDate: e.target.value }))} className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-[#17394f]" />
+              <input type="time" value={form.shootTime} onChange={e => setForm(f => ({ ...f, shootTime: e.target.value }))} className="w-full mt-1.5 text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-[#17394f]" placeholder="Hora (opcional)" />
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-600 mb-1.5">Fecha de fin</label>
               <input type="date" value={form.endDate} min={form.shootDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-[#17394f]" />
+              <input type="time" value={form.endTime} onChange={e => setForm(f => ({ ...f, endTime: e.target.value }))} className="w-full mt-1.5 text-sm border border-slate-200 rounded-lg px-3 py-2 outline-none focus:border-[#17394f]" placeholder="Hora (opcional)" />
             </div>
           </div>
           <div>
@@ -194,7 +204,7 @@ export function RodajesClient({ shoots: initialShoots, userRole, clients }: { sh
   const [dayFilter, setDayFilter] = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [showCal, setShowCal]     = useState(false)
-  const canEdit = userRole !== 'TEAM'
+  const canEdit = userRole === 'ADMIN' || userRole === 'LEAD'
   const router = useRouter()
 
   const filtered = useMemo(() => shoots.filter(s =>

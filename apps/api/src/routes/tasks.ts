@@ -6,7 +6,6 @@ import { logActivity } from '../lib/activityLogger'
 import { logProjectHistory } from '../lib/projectHistory'
 import { sendTaskAssignedEmail, sendTaskStatusChangedEmail, sendGenericEmail } from '../lib/email'
 import { getSettings } from '../lib/settings'
-import { notifyTaskAssigned, notifyTaskStatusChanged } from '../lib/whatsapp'
 import { createNotification, createNotifications } from '../lib/notify'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -27,15 +26,15 @@ const TASK_TYPE_LABEL: Record<string, string> = {
 
 // Prisma include shape for task assignees
 const ASSIGNEE_INCLUDE = {
-  user: { select: { id: true, name: true, area: true, email: true, phone: true, whatsappNotif: true, status: true } },
+  user: { select: { id: true, name: true, area: true, email: true, status: true } },
 }
 
 // Flatten task: transform assignees array from join-table shape to flat user objects
-function flatAssignees(assignees: { user: { id: string; name: string; area: string | null; email: string; phone: string | null; whatsappNotif: boolean; status: string } }[]) {
+function flatAssignees(assignees: { user: { id: string; name: string; area: string | null; email: string; status: string } }[]) {
   return assignees.map(a => a.user)
 }
 
-// Only ACTIVE users receive email/whatsapp notifications
+// Only ACTIVE users receive email notifications
 function activeOnly<T extends { status: string }>(users: T[]): T[] {
   return users.filter(u => u.status === 'ACTIVE')
 }
@@ -82,9 +81,9 @@ async function checkBriefProductionComplete(briefId: string, actorName: string) 
 }
 
 // Get all admin emails (for status-change notifications)
-async function getAdminEmails(): Promise<string[]> {
+async function getAdminEmails(excludeUserId?: string): Promise<string[]> {
   const admins = await prisma.user.findMany({
-    where: { role: 'ADMIN', status: 'ACTIVE' },
+    where: { role: 'ADMIN', status: 'ACTIVE', ...(excludeUserId ? { id: { not: excludeUserId } } : {}) },
     select: { email: true },
   })
   return admins.map(a => a.email)
@@ -390,12 +389,6 @@ tasksRouter.post('/', isAuth, async (req, res) => {
         dueDate:       task.dueDate ?? null,
         projectId:     projectId ?? '',
       }).catch(console.error)
-      notifyTaskAssigned({
-        user:        { phone: assignee.phone ?? null, whatsappNotif: assignee.whatsappNotif },
-        taskTitle:   task.title,
-        projectName: project?.name ?? '',
-        dueDate:     task.dueDate,
-      }).catch(console.error)
       if (assignee.id !== userId) {
         createNotification({
           userId: assignee.id,
@@ -474,37 +467,31 @@ tasksRouter.patch('/:id', isAuth, async (req, res) => {
     })
 
     if (addedIds.length > 0) {
-      await logActivity({ actorId: user!.userId, eventType: 'task_assigned', entityType: 'task', entityId: task.id, entityName: task.title, meta: { added: addedIds, removed: removedIds, project_name: task.project.name } })
+      await logActivity({ actorId: user!.userId, eventType: 'task_assigned', entityType: 'task', entityId: task.id, entityName: task.title, meta: { added: addedIds, removed: removedIds, project_name: task.project?.name ?? '' } })
 
       const newAssignees = activeOnly(flatAssignees(refreshed?.assignees ?? []).filter(a => addedIds.includes(a.id)))
       const actor = await prisma.user.findUnique({ where: { id: user!.userId }, select: { name: true } })
 
       for (const assignee of newAssignees) {
-        await ensureMember(task.projectId, assignee.id, user!.userId)
+        if (task.projectId) await ensureMember(task.projectId, assignee.id, user!.userId)
         sendTaskAssignedEmail({
           to:            assignee.email,
           recipientName: assignee.name,
           assignerName:  actor?.name ?? 'Un admin',
           taskTitle:     task.title,
           taskTypeLabel: updated.taskType ? TASK_TYPE_LABEL[updated.taskType] : null,
-          projectName:   task.project.name,
-          clientName:    refreshed?.project.client?.name ?? '',
+          projectName:   task.project?.name ?? '',
+          clientName:    refreshed?.project?.client?.name ?? '',
           dueDate:       updated.dueDate ?? null,
           projectId:     task.projectId,
-        }).catch(console.error)
-        notifyTaskAssigned({
-          user:        { phone: assignee.phone ?? null, whatsappNotif: assignee.whatsappNotif },
-          taskTitle:   task.title,
-          projectName: task.project.name,
-          dueDate:     updated.dueDate,
         }).catch(console.error)
         if (assignee.id !== user!.userId) {
           createNotification({
             userId: assignee.id,
             type:   'task_assigned',
             title:  `Tarea asignada: ${task.title}`,
-            body:   `${actor?.name ?? 'Un admin'} te asignó una tarea en ${task.project.name}`,
-            link:   `/projects/${task.projectId}`,
+            body:   `${actor?.name ?? 'Un admin'} te asignó una tarea${task.project ? ` en ${task.project.name}` : ''}`,
+            link:   task.projectId ? `/projects/${task.projectId}` : '/tasks',
           }).catch(console.error)
         }
       }
@@ -517,36 +504,27 @@ tasksRouter.patch('/:id', isAuth, async (req, res) => {
 
   // Log status change
   if (status && status !== task.status) {
-    await logActivity({ actorId: user!.userId, eventType: 'task_status_changed', entityType: 'task', entityId: task.id, entityName: task.title, meta: { from_status: task.status, to_status: status, project_name: task.project.name } })
-    await logProjectHistory({ projectId: task.projectId, actorId: user!.userId, eventType: 'task_status_changed', description: `"${task.title}" movida de ${task.status} a ${status}`, meta: { taskId: task.id } })
+    await logActivity({ actorId: user!.userId, eventType: 'task_status_changed', entityType: 'task', entityId: task.id, entityName: task.title, meta: { from_status: task.status, to_status: status, project_name: task.project?.name ?? '' } })
+    if (task.projectId) {
+      await logProjectHistory({ projectId: task.projectId, actorId: user!.userId, eventType: 'task_status_changed', description: `"${task.title}" movida de ${task.status} a ${status}`, meta: { taskId: task.id } })
+    }
 
     const [adminEmails, actor] = await Promise.all([
-      getAdminEmails(),
+      getAdminEmails(user!.userId),
       prisma.user.findUnique({ where: { id: user!.userId }, select: { name: true } }),
     ])
     sendTaskStatusChangedEmail({
       adminEmails,
       changerName:  actor?.name ?? 'Usuario',
       taskTitle:    task.title,
-      projectName:  task.project.name,
-      clientName:   updated.project.client?.name ?? '',
+      projectName:  task.project?.name ?? '',
+      clientName:   updated.project?.client?.name ?? '',
       fromStatus:   task.status,
       toStatus:     status,
       projectId:    task.projectId,
     }).catch(console.error)
 
     // WhatsApp to all assignees except the changer
-    for (const a of updated.assignees) {
-      if (a.userId === user!.userId) continue
-      notifyTaskStatusChanged({
-        user:        { phone: a.user.phone ?? null, whatsappNotif: a.user.whatsappNotif },
-        taskTitle:   task.title,
-        fromStatus:  task.status,
-        toStatus:    status,
-        changerName: actor?.name ?? 'Usuario',
-      }).catch(console.error)
-    }
-
     // In-app notifications: admins + leads + assignees (excluding changer)
     const actorName = actor?.name ?? 'Usuario'
     const assigneeIds = flatAssignees(updated.assignees).map(a => a.id)
@@ -593,35 +571,23 @@ tasksRouter.patch('/:id/status', isAuth, async (req, res) => {
     include: { assignees: { include: ASSIGNEE_INCLUDE } },
   })
 
-  await logActivity({ actorId: req.user!.userId, eventType: 'task_status_changed', entityType: 'task', entityId: task.id, entityName: task.title, meta: { from_status: task.status, to_status: status, project_name: task.project.name } })
+  await logActivity({ actorId: req.user!.userId, eventType: 'task_status_changed', entityType: 'task', entityId: task.id, entityName: task.title, meta: { from_status: task.status, to_status: status, project_name: task.project?.name ?? '' } })
   await logProjectHistory({ projectId: task.projectId, actorId: req.user!.userId, eventType: 'task_status_changed', description: `"${task.title}" movida de ${task.status} a ${status}`, meta: { taskId: task.id } })
 
   const [adminEmails, actor] = await Promise.all([
-    getAdminEmails(),
+    getAdminEmails(req.user!.userId),
     prisma.user.findUnique({ where: { id: req.user!.userId }, select: { name: true } }),
   ])
   sendTaskStatusChangedEmail({
     adminEmails,
     changerName:  actor?.name ?? 'Usuario',
     taskTitle:    task.title,
-    projectName:  task.project.name,
-    clientName:   task.project.client?.name ?? '',
+    projectName:  task.project?.name ?? '',
+    clientName:   task.project?.client?.name ?? '',
     fromStatus:   task.status,
     toStatus:     status,
     projectId:    task.projectId,
   }).catch(console.error)
-
-  // WhatsApp to all assignees except the changer
-  for (const a of updated.assignees) {
-    if (a.userId === req.user!.userId) continue
-    notifyTaskStatusChanged({
-      user:        { phone: a.user.phone ?? null, whatsappNotif: a.user.whatsappNotif },
-      taskTitle:   task.title,
-      fromStatus:  task.status,
-      toStatus:    status,
-      changerName: actor?.name ?? 'Usuario',
-    }).catch(console.error)
-  }
 
   // In-app notifications: admins + leads + assignees (excluding changer)
   const statusActorName = actor?.name ?? 'Usuario'

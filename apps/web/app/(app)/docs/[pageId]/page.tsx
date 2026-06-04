@@ -93,6 +93,7 @@ export default async function DocPageRoute({ params }: PageProps) {
       contextName={context.name}
       contextEmoji={context.emoji}
       isAdmin={isAdmin}
+      currentUserId={me.id}
     />
   )
 }

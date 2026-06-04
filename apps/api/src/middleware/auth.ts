@@ -42,7 +42,7 @@ export async function isAuth(req: Request, res: Response, next: NextFunction): P
     return
   }
 
-  // If token has a jti, validate it's not revoked in DB
+  // If token has a jti, validate it's not revoked in DB and track activity
   if (payload.jti) {
     const crypto = await import('crypto')
     const tokenHash = crypto.createHash('sha256').update(payload.jti).digest('hex')
@@ -50,6 +50,16 @@ export async function isAuth(req: Request, res: Response, next: NextFunction): P
     if (!session || session.revokedAt || session.expiresAt < new Date()) {
       res.status(401).json({ error: 'Sesión inválida o expirada' })
       return
+    }
+    // Throttled lastActivityAt update (max once per 60s per session)
+    const now = new Date()
+    const stale = !session.lastActivityAt ||
+      (now.getTime() - session.lastActivityAt.getTime()) > 60_000
+    if (stale) {
+      prisma.refreshToken.update({
+        where: { id: session.id },
+        data:  { lastActivityAt: now },
+      }).catch(() => {})
     }
   }
 

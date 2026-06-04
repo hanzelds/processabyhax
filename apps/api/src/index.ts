@@ -32,6 +32,8 @@ import { vehiclesRouter } from './routes/vehicles'
 import { shootsRouter } from './routes/shoots'
 import { servicesRouter } from './routes/services'
 import { clientServicesRouter } from './routes/clientServices'
+import { metaRouter } from './routes/meta'
+import { credentialsRouter } from './routes/credentials'
 import { sendTaskReminders } from './lib/taskRemindersJob'
 import { getSettings } from './lib/settings'
 
@@ -97,6 +99,8 @@ app.use('/api/vehicles',       vehiclesRouter)
 app.use('/api/shoots',         shootsRouter)
 app.use('/api/services',      servicesRouter)
 app.use('/api/clients',       clientServicesRouter)
+app.use('/api/meta',          metaRouter)
+app.use('/api/credentials',   credentialsRouter)
 
 app.all('*', (_, res) => res.status(404).json({ error: 'Not found' }))
 

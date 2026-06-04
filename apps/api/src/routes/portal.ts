@@ -168,24 +168,25 @@ portalRouter.get('/:token', async (req, res) => {
   const monthEnd   = new Date(y, m, 0)    // last day
 
   const [pieces, briefs, objective, approvals] = await Promise.all([
+    // Unified: pieces needing content review OR date confirmation
     prisma.contentPiece.findMany({
       where: {
         clientId,
-        status: 'en_revision',
+        OR: [{ status: 'en_revision' }, { calendarDraft: true }],
       },
       orderBy: [{ scheduledDate: 'asc' }, { createdAt: 'asc' }],
       select: {
         id: true, title: true, type: true, platforms: true, status: true,
         copy: true, hashtags: true, referencesUrls: true, publicationNotes: true,
-        scheduledDate: true, scheduledTime: true,
+        scheduledDate: true, scheduledTime: true, calendarDraft: true,
         briefId: true,
         brief: {
           select: {
+            concept: true, script: true, copyDraft: true,
+            hashtags: true, referencesUrls: true, technicalNotes: true,
             files: {
-              where: { mimeType: { startsWith: 'image/' } },
-              select: { id: true },
+              select: { id: true, originalName: true, mimeType: true, sizeBytes: true, label: true, createdAt: true },
               orderBy: { createdAt: 'asc' },
-              take: 1,
             },
             scripts: {
               select: { id: true, title: true, status: true, type: true, content: true },
@@ -193,6 +194,12 @@ portalRouter.get('/:token', async (req, res) => {
               orderBy: { createdAt: 'asc' as const },
             },
           },
+        },
+        // Include all recent approvals so we can split content vs date
+        clientApprovals: {
+          orderBy: { actionedAt: 'desc' as const },
+          take: 10,
+          select: { action: true, changeType: true, feedback: true, actionedAt: true },
         },
       },
     }),
@@ -225,27 +232,43 @@ portalRouter.get('/:token', async (req, res) => {
     }),
   ])
 
-  // Build approval map for quick lookup
-  const pieceApprovalMap: Record<string, { action: string; changeType: string | null; feedback: string | null }> = {}
+  // Build brief approval map
   const briefApprovalMap: Record<string, { action: string; changeType: string | null; feedback: string | null }> = {}
   for (const a of approvals) {
-    if (a.pieceId && !pieceApprovalMap[a.pieceId]) {
-      pieceApprovalMap[a.pieceId] = { action: a.action, changeType: a.changeType, feedback: a.feedback }
-    }
     if (a.briefId && !briefApprovalMap[a.briefId]) {
       briefApprovalMap[a.briefId] = { action: a.action, changeType: a.changeType, feedback: a.feedback }
     }
   }
 
-  // Annotate pieces with approval status from this portal
-  const annotatedPieces = pieces.map(p => ({
-    ...p,
-    scheduledDate: p.scheduledDate ? p.scheduledDate.toISOString().split('T')[0] : null,
-    coverImageFileId: p.brief?.files?.[0]?.id ?? null,
-    scripts: p.brief?.scripts ?? [],
-    brief: undefined,
-    portalApproval: pieceApprovalMap[p.id] ?? null,
-  }))
+  // Annotate pieces — split approvals into contentApproval vs dateApproval
+  const annotatedPieces = pieces.map(p => {
+    const contentApproval = p.clientApprovals.find(a => a.changeType !== 'date') ?? null
+    const dateApproval    = p.clientApprovals.find(a => a.changeType === 'date') ?? null
+    const brief = p.brief
+    // Cover image: first image file from the brief
+    const coverImageFileId = brief?.files?.find(f => f.mimeType.startsWith('image/'))?.id ?? null
+    return {
+      id: p.id, title: p.title, type: p.type, platforms: p.platforms, status: p.status,
+      // Piece's own fields
+      copy: p.copy, hashtags: p.hashtags ?? brief?.hashtags ?? null,
+      referencesUrls: p.referencesUrls?.length ? p.referencesUrls : (brief?.referencesUrls ?? []),
+      publicationNotes: p.publicationNotes,
+      scheduledDate: p.scheduledDate ? p.scheduledDate.toISOString().split('T')[0] : null,
+      scheduledTime: p.scheduledTime, calendarDraft: p.calendarDraft,
+      briefId: p.briefId,
+      coverImageFileId,
+      scripts: brief?.scripts ?? [],
+      // Brief content fields (concept, script text, copyDraft, technicalNotes, files)
+      concept: brief?.concept ?? null,
+      script: brief?.script ?? null,
+      copyDraft: brief?.copyDraft ?? null,
+      technicalNotes: brief?.technicalNotes ?? null,
+      briefFiles: brief?.files ?? [],
+      contentApproval: contentApproval ? { action: contentApproval.action, changeType: contentApproval.changeType, feedback: contentApproval.feedback } : null,
+      dateApproval: dateApproval ? { action: dateApproval.action, changeType: dateApproval.changeType, feedback: dateApproval.feedback } : null,
+      portalApproval: contentApproval ? { action: contentApproval.action, changeType: contentApproval.changeType, feedback: contentApproval.feedback } : null,
+    }
+  })
 
   const annotatedBriefs = briefs.map(b => ({
     ...b,
@@ -253,10 +276,10 @@ portalRouter.get('/:token', async (req, res) => {
   }))
 
   // Stats
-  const stories = annotatedPieces.filter(p => p.type === 'story')
+  const stories    = annotatedPieces.filter(p => p.type === 'story')
   const mainPieces = annotatedPieces.filter(p => p.type !== 'story')
-  const pendingMain = mainPieces.filter(p => !pieceApprovalMap[p.id])
-  const pendingStories = stories.filter(p => !pieceApprovalMap[p.id])
+  const pendingMain    = mainPieces.filter(p => p.status === 'en_revision' && !p.contentApproval)
+  const pendingStories = stories.filter(p => p.status === 'en_revision' && !p.contentApproval)
 
   return res.json({
     client:    { id: tokenRow.client.id, name: tokenRow.client.name },
@@ -294,7 +317,7 @@ portalRouter.post('/:token/approve/:pieceId', async (req, res) => {
 
   const piece = await prisma.contentPiece.findFirst({
     where: { id: pieceId, clientId: tokenRow.clientId },
-    select: { id: true, title: true, status: true },
+    select: { id: true, title: true, status: true, briefId: true },
   })
   if (!piece) return res.status(404).json({ error: 'Pieza no encontrada' })
 
@@ -308,12 +331,26 @@ portalRouter.post('/:token/approve/:pieceId', async (req, res) => {
     },
   })
 
-  // Auto-advance status: en_revision → listo
+  // Auto-advance piece: en_revision → listo
   if (piece.status === 'en_revision' || piece.status === 'listo') {
     await prisma.contentPiece.update({
       where: { id: pieceId },
       data: { status: 'listo' },
     })
+  }
+
+  // If piece is linked to a brief in aprobacion_cliente → advance brief to aprobado
+  if (piece.briefId) {
+    const brief = await prisma.contentBrief.findUnique({
+      where: { id: piece.briefId },
+      select: { id: true, status: true },
+    })
+    if (brief && brief.status === 'aprobacion_cliente') {
+      await prisma.contentBrief.update({
+        where: { id: piece.briefId },
+        data: { status: 'aprobado' },
+      })
+    }
   }
 
   // Notify team
@@ -383,14 +420,11 @@ portalRouter.post('/:token/approve-brief/:briefId', async (req, res) => {
     },
   })
 
-  // If brief has attached files → entregado, otherwise → en_produccion
-  const nextStatus = brief._count.files > 0 ? 'entregado' : 'en_produccion'
-
-  // Approve brief + all linked scripts in one transaction
+  // Approve brief + all linked scripts in one transaction — always goes to aprobado first
   await prisma.$transaction([
     prisma.contentBrief.update({
       where: { id: briefId },
-      data: { status: nextStatus },
+      data: { status: 'aprobado' },
     }),
     ...(brief.scripts.length > 0 ? [
       prisma.script.updateMany({
@@ -424,7 +458,7 @@ portalRouter.post('/:token/changes/:pieceId', async (req, res) => {
 
   const piece = await prisma.contentPiece.findFirst({
     where: { id: pieceId, clientId: tokenRow.clientId },
-    select: { id: true, title: true },
+    select: { id: true, title: true, briefId: true },
   })
   if (!piece) return res.status(404).json({ error: 'Pieza no encontrada' })
 
@@ -444,6 +478,14 @@ portalRouter.post('/:token/changes/:pieceId', async (req, res) => {
     where: { id: pieceId },
     data: { status: 'en_revision' },
   })
+
+  // If linked brief is in aprobacion_cliente → save feedback in clientApprovalNotes (don't move status)
+  if (piece.briefId && feedback) {
+    await prisma.contentBrief.updateMany({
+      where: { id: piece.briefId, status: 'aprobacion_cliente' },
+      data: { clientApprovalNotes: feedback },
+    })
+  }
 
   const appUrl = process.env.APP_URL || 'https://processa.hax.com.do'
   const adminEmails = await getAdminEmails()
@@ -506,6 +548,100 @@ portalRouter.post('/:token/changes-brief/:briefId', async (req, res) => {
     month:      monthLabel(tokenRow.month),
     portalUrl:  `${appUrl}/content/briefs`,
   }).catch(e => console.error('[Portal] brief changes email error:', e))
+
+  return res.json({ ok: true })
+})
+
+// ── PUBLIC: approve a proposed calendar date ─────────────────────────────────
+
+portalRouter.post('/:token/approve-date/:pieceId', async (req, res) => {
+  const tokenRow = await resolveToken(req.params.token)
+  if (!tokenRow) return res.status(401).json({ error: 'Token inválido o expirado' })
+
+  const { pieceId } = req.params
+
+  const piece = await prisma.contentPiece.findFirst({
+    where: { id: pieceId, clientId: tokenRow.clientId, calendarDraft: true },
+    select: { id: true, title: true, scheduledDate: true, scheduledTime: true },
+  })
+  if (!piece) return res.status(404).json({ error: 'Pieza no encontrada o ya confirmada' })
+
+  // Record approval for the date
+  await prisma.clientContentApproval.create({
+    data: {
+      pieceId,
+      clientId:   tokenRow.clientId,
+      tokenId:    tokenRow.id,
+      action:     'approved',
+      changeType: 'date',
+    },
+  })
+
+  // Confirm: calendarDraft=false, status=programado
+  await prisma.contentPiece.update({
+    where: { id: pieceId },
+    data: { calendarDraft: false, status: 'programado' },
+  })
+
+  const appUrl = process.env.APP_URL || 'https://processa.hax.com.do'
+  const adminEmails = await getAdminEmails()
+  sendClientApprovedEmail({
+    adminEmails,
+    clientName: tokenRow.client.name,
+    pieceName:  `${piece.title} (fecha ${piece.scheduledDate ? piece.scheduledDate.toISOString().split('T')[0] : ''}${piece.scheduledTime ? ' ' + piece.scheduledTime : ''})`,
+    month:      monthLabel(tokenRow.month),
+    portalUrl:  `${appUrl}/content/calendar`,
+  }).catch(e => console.error('[Portal] approve-date email error:', e))
+
+  return res.json({ ok: true })
+})
+
+// ── PUBLIC: request changes or reject a proposed calendar date ────────────────
+
+portalRouter.post('/:token/changes-date/:pieceId', async (req, res) => {
+  const tokenRow = await resolveToken(req.params.token)
+  if (!tokenRow) return res.status(401).json({ error: 'Token inválido o expirado' })
+
+  const { pieceId } = req.params
+  const { feedback, clearDate } = req.body  // clearDate=true → reject (remove date); false → request change (keep draft visible)
+
+  const piece = await prisma.contentPiece.findFirst({
+    where: { id: pieceId, clientId: tokenRow.clientId },
+    select: { id: true, title: true },
+  })
+  if (!piece) return res.status(404).json({ error: 'Pieza no encontrada' })
+
+  await prisma.clientContentApproval.create({
+    data: {
+      pieceId,
+      clientId:   tokenRow.clientId,
+      tokenId:    tokenRow.id,
+      action:     'changes_requested',
+      changeType: 'date',
+      feedback:   feedback || null,
+    },
+  })
+
+  if (clearDate) {
+    // Reject: remove date, clear draft flag, piece returns to inbox
+    await prisma.contentPiece.update({
+      where: { id: pieceId },
+      data: { calendarDraft: false, scheduledDate: null, scheduledTime: null, status: 'listo' },
+    })
+  }
+  // If !clearDate, piece stays with calendarDraft=true (team will re-propose)
+
+  const appUrl = process.env.APP_URL || 'https://processa.hax.com.do'
+  const adminEmails = await getAdminEmails()
+  sendClientChangesEmail({
+    adminEmails,
+    clientName: tokenRow.client.name,
+    pieceName:  piece.title,
+    changeType: 'date',
+    feedback:   feedback || null,
+    month:      monthLabel(tokenRow.month),
+    portalUrl:  `${appUrl}/content/calendar`,
+  }).catch(e => console.error('[Portal] changes-date email error:', e))
 
   return res.json({ ok: true })
 })

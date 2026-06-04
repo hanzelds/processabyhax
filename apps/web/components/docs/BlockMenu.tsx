@@ -7,8 +7,8 @@ import { BLOCK_LABELS } from './docUtils'
 const MENU_SECTIONS: { label: string; items: DocBlockType[] }[] = [
   { label: 'Texto', items: ['paragraph', 'heading_1', 'heading_2', 'heading_3'] },
   { label: 'Listas', items: ['bulleted_list', 'numbered_list'] },
-  { label: 'Estructura', items: ['divider', 'callout', 'code'] },
-  { label: 'Media', items: ['image', 'child_page'] },
+  { label: 'Estructura', items: ['divider', 'callout', 'code', 'table', 'toggle', 'quote'] },
+  { label: 'Media', items: ['image', 'video', 'embed', 'child_page'] },
 ]
 
 const ALL_ITEMS: DocBlockType[] = MENU_SECTIONS.flatMap(s => s.items)

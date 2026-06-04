@@ -88,6 +88,28 @@ function BriefCard({ brief, onClick, onDragStart }: { brief: ContentBrief; onCli
           ))}
         </div>
       )}
+      {/* Client feedback indicator */}
+      {brief.clientApprovalNotes && (
+        <div className="flex items-start gap-1.5 mb-2.5 px-2 py-1.5 rounded-lg bg-amber-50 border border-amber-200">
+          <span className="text-amber-500 text-[10px] shrink-0 mt-px">💬</span>
+          <span className="text-[10px] text-amber-700 leading-snug line-clamp-2">"{brief.clientApprovalNotes}"</span>
+        </div>
+      )}
+
+      {/* Calendar draft indicator */}
+      {(() => {
+        const draftPiece = brief.contentPieces?.find(p => p.calendarDraft && p.scheduledDate)
+        if (!draftPiece) return null
+        const dateStr = new Date(draftPiece.scheduledDate!.slice(0, 10) + 'T00:00:00').toLocaleDateString('es-DO', { day: 'numeric', month: 'short' })
+        return (
+          <div className="flex items-center gap-1 mb-2.5 px-2 py-1 rounded-lg bg-amber-50 border border-amber-200">
+            <span className="text-amber-500 text-[10px]">📅</span>
+            <span className="text-[10px] font-semibold text-amber-700">Borrador: {dateStr}</span>
+            <span className="text-[10px] text-amber-400 ml-auto">Pendiente cliente</span>
+          </div>
+        )
+      })()}
+
       <div className="flex items-center justify-between">
         <div className="flex -space-x-1.5">
           {brief.assignees.slice(0, 4).map(a => <Avatar key={a.id} name={a.user.name} />)}
@@ -465,7 +487,15 @@ export function BriefPipeline({ initialBriefs, users, isAdmin, currentUserId, se
           currentUserId={currentUserId}
           onUpdate={refreshBrief}
           onDelete={deleteBrief}
-          onClose={() => setSelectedBrief(null)}
+          onClose={async () => {
+            if (selectedBrief) {
+              try {
+                const updated = await api.get<ContentBrief>(`/api/briefs/${selectedBrief.id}`)
+                setBriefs(prev => prev.map(b => b.id === updated.id ? updated : b))
+              } catch { /* silently ignore */ }
+            }
+            setSelectedBrief(null)
+          }}
         />
       )}
     </div>

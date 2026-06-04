@@ -51,17 +51,25 @@ const PIECE_CHIP_BORDER: Record<string, string> = {
 function PieceChip({ piece, onClick }: { piece: ContentPiece; onClick: () => void }) {
   const [dragging, setDragging] = useState(false)
   const copyAlert = piece.copyStatus === 'pendiente' && piece.status === 'programado'
-  const borderColor = PIECE_CHIP_BORDER[piece.status] ?? 'border-l-slate-300'
+  const isDraft = !!piece.calendarDraft
+  const borderColor = isDraft ? 'border-l-amber-400' : (PIECE_CHIP_BORDER[piece.status] ?? 'border-l-slate-300')
   return (
     <div
       draggable
       onDragStart={e => { e.stopPropagation(); e.dataTransfer.setData('pieceId', piece.id); setDragging(true) }}
       onDragEnd={() => setDragging(false)}
       onClick={e => { e.stopPropagation(); onClick() }}
-      className={`flex flex-col rounded px-1.5 py-1 border-l-2 bg-white border border-slate-100 transition-all select-none ${borderColor} ${
-        dragging ? 'opacity-40 cursor-grabbing' : 'cursor-grab hover:opacity-80 hover:shadow-sm'
-      }`}
+      className={`relative flex flex-col rounded px-1.5 py-1 border-l-2 bg-white transition-all select-none ${borderColor} ${
+        isDraft
+          ? 'border border-dashed border-amber-200 bg-amber-50/40'
+          : 'border border-slate-100'
+      } ${dragging ? 'opacity-40 cursor-grabbing' : 'cursor-grab hover:opacity-80 hover:shadow-sm'}`}
     >
+      {isDraft && (
+        <span className="absolute -top-1.5 right-0.5 text-[8px] font-bold text-amber-600 bg-amber-100 px-1 rounded leading-tight">
+          BORRADOR
+        </span>
+      )}
       <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide leading-none">
         {CONTENT_TYPE_LABEL[piece.type]}
       </span>

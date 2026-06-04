@@ -194,3 +194,86 @@ reportsRouter.get('/user/:userId', async (req: Request, res: Response) => {
 
   res.json({ user, hoursByWeek, hoursByProject, totalHours: +(entries.reduce((s, e) => s + e.minutes, 0) / 60).toFixed(1) })
 })
+
+// ── GET /sessions ─────────────────────────────────────────────────────────────
+
+reportsRouter.get('/sessions', isAuth, async (req, res) => {
+  if (req.user!.role !== 'ADMIN' && req.user!.role !== 'LEAD') {
+    res.status(403).json({ error: 'Sin permiso' }); return
+  }
+
+  const { startDate, endDate } = req.query as Record<string, string>
+  const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+  const end   = endDate   ? new Date(endDate)   : new Date()
+
+  const tokens = await prisma.refreshToken.findMany({
+    where: { createdAt: { gte: start, lte: end } },
+    include: { user: { select: { id: true, name: true, area: true, role: true } } },
+    orderBy: { createdAt: 'desc' },
+  })
+
+  const now = new Date()
+
+  // Group by user
+  const byUser = new Map<string, typeof tokens>()
+  for (const t of tokens) {
+    const arr = byUser.get(t.userId) ?? []
+    arr.push(t)
+    byUser.set(t.userId, arr)
+  }
+
+  const result = Array.from(byUser.values()).map(userTokens => {
+    const { user } = userTokens[0]
+
+    const sessions = userTokens.map(t => {
+      const activityEnd = t.revokedAt ?? t.lastActivityAt ?? null
+      const durationMinutes = activityEnd
+        ? Math.max(0, Math.floor((activityEnd.getTime() - t.createdAt.getTime()) / 60_000))
+        : 0
+      const isActive = !t.revokedAt &&
+        t.expiresAt > now &&
+        !!t.lastActivityAt &&
+        (now.getTime() - t.lastActivityAt.getTime()) < 15 * 60_000
+
+      return {
+        id:             t.id,
+        startedAt:      t.createdAt,
+        lastActivityAt: t.lastActivityAt,
+        endedAt:        t.revokedAt,
+        durationMinutes,
+        deviceInfo:     t.deviceInfo ?? null,
+        ipAddress:      maskIp(t.ipAddress),
+        isActive,
+      }
+    })
+
+    const withActivity = sessions.filter(s => s.durationMinutes > 0)
+    const total = withActivity.reduce((s, t) => s + t.durationMinutes, 0)
+    const avgDuration = withActivity.length > 0 ? Math.floor(total / withActivity.length) : 0
+    const longestDuration = withActivity.length > 0 ? Math.max(...withActivity.map(s => s.durationMinutes)) : 0
+
+    return {
+      userId:                 user.id,
+      name:                   user.name,
+      area:                   user.area,
+      role:                   user.role,
+      activeSessions:         sessions.filter(s => s.isActive).length,
+      totalSessionsInRange:   sessions.length,
+      sessionsWithActivity:   withActivity.length,
+      avgDurationMinutes:     avgDuration,
+      longestDurationMinutes: longestDuration,
+      lastLoginAt:            userTokens[0].createdAt,
+      sessions,
+    }
+  })
+
+  result.sort((a, b) => new Date(b.lastLoginAt).getTime() - new Date(a.lastLoginAt).getTime())
+  res.json(result)
+})
+
+function maskIp(ip: string | null | undefined): string | null {
+  if (!ip) return null
+  const parts = ip.split('.')
+  if (parts.length === 4) return `${parts[0]}.${parts[1]}.${parts[2]}.*`
+  return ip
+}

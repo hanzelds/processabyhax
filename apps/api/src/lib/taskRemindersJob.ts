@@ -1,22 +1,17 @@
 /**
- * taskRemindersJob.ts — Cron diario de recordatorios WhatsApp de tareas.
+ * taskRemindersJob.ts — Cron diario de recordatorios de tareas.
  *
  * - Recordatorio 24h antes: tareas que vencen mañana
- * - Primer aviso vencimiento: tareas que vencieron ayer (notifica solo 1 vez)
+ * - Primer aviso vencimiento: tareas que vencieron ayer
  */
 
 import { prisma } from './prisma'
-import { notifyTaskDueSoon, notifyTaskOverdue } from './whatsapp'
 
 function startOf(d: Date): Date {
   const r = new Date(d); r.setHours(0, 0, 0, 0); return r
 }
 function endOf(d: Date): Date {
   const r = new Date(d); r.setHours(23, 59, 59, 999); return r
-}
-
-const ASSIGNEE_INCLUDE = {
-  user: { select: { phone: true, whatsappNotif: true, name: true } },
 }
 
 export async function sendTaskReminders(): Promise<void> {
@@ -32,20 +27,10 @@ export async function sendTaskReminders(): Promise<void> {
       assignees: { some: {} },
     },
     include: {
-      assignees: { include: ASSIGNEE_INCLUDE },
+      assignees: { include: { user: { select: { name: true } } } },
       project:   { select: { name: true } },
     },
   })
-
-  for (const task of dueSoon) {
-    for (const { user } of task.assignees) {
-      await notifyTaskDueSoon({
-        user:        { phone: user.phone ?? null, whatsappNotif: user.whatsappNotif },
-        taskTitle:   task.title,
-        projectName: task.project.name,
-      }).catch(e => console.error('[Reminders] dueSoon error:', e))
-    }
-  }
 
   // ── Tareas que vencieron ayer (primer día de vencimiento) ─────────────────
   const overdue = await prisma.task.findMany({
@@ -55,23 +40,13 @@ export async function sendTaskReminders(): Promise<void> {
       assignees: { some: {} },
     },
     include: {
-      assignees: { include: ASSIGNEE_INCLUDE },
+      assignees: { include: { user: { select: { name: true } } } },
       project:   { select: { name: true } },
     },
   })
 
-  for (const task of overdue) {
-    for (const { user } of task.assignees) {
-      await notifyTaskOverdue({
-        user:        { phone: user.phone ?? null, whatsappNotif: user.whatsappNotif },
-        taskTitle:   task.title,
-        projectName: task.project.name,
-      }).catch(e => console.error('[Reminders] overdue error:', e))
-    }
-  }
-
   const totalAssignees = dueSoon.reduce((s, t) => s + t.assignees.length, 0) + overdue.reduce((s, t) => s + t.assignees.length, 0)
   if (totalAssignees > 0) {
-    console.log(`[Reminders] ${dueSoon.length} tarea(s) por vencer · ${overdue.length} vencida(s) → ${totalAssignees} notificacion(es)`)
+    console.log(`[Reminders] ${dueSoon.length} tarea(s) por vencer · ${overdue.length} vencida(s) · ${totalAssignees} asignado(s)`)
   }
 }

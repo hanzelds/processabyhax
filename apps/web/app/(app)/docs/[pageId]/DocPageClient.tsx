@@ -14,9 +14,10 @@ interface Props {
   contextName: string
   contextEmoji?: string
   isAdmin: boolean
+  currentUserId: string
 }
 
-export function DocPageClient({ page, users, tree, contextName, contextEmoji, isAdmin }: Props) {
+export function DocPageClient({ page, users, tree, contextName, contextEmoji, isAdmin, currentUserId }: Props) {
   const [pageTitle, setPageTitle] = useState(page.title)
 
   // Build breadcrumb from tree
@@ -77,6 +78,8 @@ export function DocPageClient({ page, users, tree, contextName, contextEmoji, is
           users={users}
           readOnly={false}
           onTitleChange={setPageTitle}
+          isAdmin={isAdmin}
+          currentUserId={currentUserId}
         />
       </div>
     </div>

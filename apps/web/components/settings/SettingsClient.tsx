@@ -155,12 +155,10 @@ function Toggle({ checked, onChange, label, description }: {
 // ── Perfil Tab ────────────────────────────────────────────────────────────────
 
 function PerfilTab({ user, onUpdate }: { user: User; onUpdate: (u: User) => void }) {
-  const [name,           setName]           = useState(user.name)
-  const [bio,            setBio]            = useState(user.bio ?? '')
-  const [phone,          setPhone]          = useState(user.phone ?? '')
-  const [whatsappNotif,  setWhatsappNotif]  = useState(user.whatsappNotif ?? true)
-  const [saving, setSaving] = useState(false)
-  const [toast, setToast]   = useState<{ msg: string; ok: boolean } | null>(null)
+  const [name,    setName]    = useState(user.name)
+  const [bio,     setBio]     = useState(user.bio ?? '')
+  const [saving,  setSaving]  = useState(false)
+  const [toast,   setToast]   = useState<{ msg: string; ok: boolean } | null>(null)
 
   function flash(msg: string, ok: boolean) {
     setToast({ msg, ok })
@@ -171,7 +169,7 @@ function PerfilTab({ user, onUpdate }: { user: User; onUpdate: (u: User) => void
     if (!name.trim()) return
     setSaving(true)
     try {
-      const updated = await api.patch<User>(`/api/users/${user.id}`, { name, bio, phone, whatsappNotif })
+      const updated = await api.patch<User>(`/api/users/${user.id}`, { name, bio })
       onUpdate(updated)
       flash('Perfil actualizado', true)
     } catch (e: unknown) {
@@ -204,14 +202,6 @@ function PerfilTab({ user, onUpdate }: { user: User; onUpdate: (u: User) => void
         <Field label="Email">
           <input className={INPUT} value={user.email} disabled />
         </Field>
-        <Field label="Teléfono">
-          <input
-            className={INPUT}
-            value={phone}
-            onChange={e => setPhone(e.target.value)}
-            placeholder="+1 809 000 0000"
-          />
-        </Field>
         <Field label="Bio">
           <textarea
             className={`${INPUT} resize-none`}
@@ -224,19 +214,6 @@ function PerfilTab({ user, onUpdate }: { user: User; onUpdate: (u: User) => void
       </Section>
 
       <Section title="Notificaciones">
-        <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 rounded-xl px-3 py-2 mb-1">
-          <MessageCircle className="w-4 h-4 shrink-0 text-green-500" />
-          Configura cómo recibes alertas. Requiere número de teléfono en formato internacional.
-        </div>
-        <div className="divide-y divide-slate-100">
-          <Toggle
-            checked={whatsappNotif}
-            onChange={setWhatsappNotif}
-            label="Notificaciones por WhatsApp"
-            description="Recibe avisos de tareas asignadas, cambios de estado y recordatorios de vencimiento"
-          />
-        </div>
-
         <div className="flex items-center justify-between pt-1">
           {toast ? <Toast msg={toast.msg} ok={toast.ok} /> : <div />}
           <button

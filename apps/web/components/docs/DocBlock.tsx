@@ -8,6 +8,11 @@ import { CalloutBlock } from './blocks/CalloutBlock'
 import { CodeBlock } from './blocks/CodeBlock'
 import { ImageBlock } from './blocks/ImageBlock'
 import { ChildPageBlock } from './blocks/ChildPageBlock'
+import { TableBlock } from './blocks/TableBlock'
+import { ToggleBlock } from './blocks/ToggleBlock'
+import { QuoteBlock } from './blocks/QuoteBlock'
+import { EmbedBlock } from './blocks/EmbedBlock'
+import { VideoBlock } from './blocks/VideoBlock'
 import { BlockOptions } from './BlockOptions'
 import { GripVertical, MoreHorizontal } from 'lucide-react'
 import { useSortable } from '@dnd-kit/sortable'
@@ -131,6 +136,52 @@ export function DocBlockRenderer({
         <ChildPageBlock
           block={block}
           blockRef={blockRef}
+          onFocus={() => onFocus(block.id)}
+        />
+      ) : block.type === 'table' ? (
+        <TableBlock
+          block={block}
+          readOnly={readOnly}
+          blockRef={blockRef}
+          onUpdate={updates => onUpdate(block.id, updates)}
+          onFocus={() => onFocus(block.id)}
+        />
+      ) : block.type === 'toggle' ? (
+        <ToggleBlock
+          block={block}
+          focused={focused}
+          readOnly={readOnly}
+          blockRef={blockRef}
+          onUpdate={updates => onUpdate(block.id, updates)}
+          onEnter={() => onEnter(block.id)}
+          onBackspaceEmpty={() => onBackspaceEmpty(block.id)}
+          onFocus={() => onFocus(block.id)}
+        />
+      ) : block.type === 'quote' ? (
+        <QuoteBlock
+          block={block}
+          focused={focused}
+          readOnly={readOnly}
+          blockRef={blockRef}
+          onUpdate={updates => onUpdate(block.id, updates)}
+          onEnter={() => onEnter(block.id)}
+          onBackspaceEmpty={() => onBackspaceEmpty(block.id)}
+          onFocus={() => onFocus(block.id)}
+        />
+      ) : block.type === 'embed' ? (
+        <EmbedBlock
+          block={block}
+          readOnly={readOnly}
+          blockRef={blockRef}
+          onUpdate={updates => onUpdate(block.id, updates)}
+          onFocus={() => onFocus(block.id)}
+        />
+      ) : block.type === 'video' ? (
+        <VideoBlock
+          block={block}
+          readOnly={readOnly}
+          blockRef={blockRef}
+          onUpdate={updates => onUpdate(block.id, updates)}
           onFocus={() => onFocus(block.id)}
         />
       ) : (

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useCallback, useId } from 'react'
-import { X, Upload, FileText, FileSpreadsheet, ChevronDown, Trash2, Check, Loader2, AlertCircle, ArrowUpDown } from 'lucide-react'
+import { X, Upload, FileText, FileSpreadsheet, ChevronDown, Trash2, Check, Loader2, AlertCircle, ArrowUpDown, FileType } from 'lucide-react'
 import { api } from '@/lib/api'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -18,9 +18,14 @@ interface ImportFile {
   filename: string
   title: string
   rawContent: string
-  format: 'md' | 'csv'
+  format: 'md' | 'csv' | 'pdf'
   role: 'root' | 'child'
   parentUid: string | null // uid of another file in the list
+  // For PDFs, store the File object for FormData upload
+  pdfFile?: File
+  // Import status (per-file, set during handleImport)
+  status?: 'pending' | 'importing' | 'done' | 'error'
+  statusMsg?: string
 }
 
 interface NotionImportModalProps {
@@ -33,9 +38,13 @@ interface NotionImportModalProps {
 
 function cleanNotionFilename(filename: string): string {
   return (filename
-    .replace(/\.(md|csv|txt)$/i, '')
+    .replace(/\.(md|csv|txt|pdf)$/i, '')
     .replace(/\s+[0-9a-f]{32}$/i, '')
     .trim()) || 'Sin título'
+}
+
+function isPdfFile(f: File): boolean {
+  return f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf'
 }
 
 function uid8() {
@@ -52,7 +61,7 @@ function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
     e.preventDefault()
     setDragging(false)
     const files = Array.from(e.dataTransfer.files).filter(f =>
-      /\.(md|csv|txt)$/i.test(f.name)
+      /\.(md|csv|txt|pdf)$/i.test(f.name)
     )
     if (files.length) onFiles(files)
   }
@@ -78,10 +87,10 @@ function DropZone({ onFiles }: { onFiles: (files: File[]) => void }) {
         <Upload className={`w-5 h-5 ${dragging ? 'text-[#17394f]' : 'text-slate-400'}`} />
       </div>
       <div className="text-center">
-        <p className="text-sm font-medium text-slate-700">Arrastra archivos de Notion aquí</p>
-        <p className="text-xs text-slate-400 mt-0.5">o haz clic para seleccionar · <span className="font-medium">.md</span> y <span className="font-medium">.csv</span></p>
+        <p className="text-sm font-medium text-slate-700">Arrastra archivos aquí</p>
+        <p className="text-xs text-slate-400 mt-0.5">o haz clic para seleccionar · <span className="font-medium">.md</span>, <span className="font-medium">.csv</span> y <span className="font-medium text-red-500">.pdf</span></p>
       </div>
-      <input ref={inputRef} type="file" multiple accept=".md,.csv,.txt" className="hidden" onChange={handleChange} />
+      <input ref={inputRef} type="file" multiple accept=".md,.csv,.txt,.pdf" className="hidden" onChange={handleChange} />
     </div>
   )
 }
@@ -125,9 +134,21 @@ export function NotionImportModal({ contexts, onClose, onImported }: NotionImpor
   // Read files from disk and add them
   const handleNewFiles = useCallback(async (dropped: File[]) => {
     const newEntries = await Promise.all(dropped.map(async f => {
+      const title = cleanNotionFilename(f.name)
+      if (isPdfFile(f)) {
+        return {
+          uid: uid8(),
+          filename: f.name,
+          title,
+          rawContent: '',
+          format: 'pdf' as const,
+          role: 'root' as const,
+          parentUid: null,
+          pdfFile: f,
+        }
+      }
       const text = await f.text()
       const format: 'md' | 'csv' = /\.csv$/i.test(f.name) ? 'csv' : 'md'
-      const title = cleanNotionFilename(f.name)
       return {
         uid: uid8(),
         filename: f.name,
@@ -178,30 +199,79 @@ export function NotionImportModal({ contexts, onClose, onImported }: NotionImpor
     }
 
     setImporting(true)
+
+    // Mark all as pending
+    setFiles(prev => prev.map(f => ({ ...f, status: 'pending' as const, statusMsg: undefined })))
+
+    let firstPageId: string | null = null
+
     try {
-      const items = files.map(f => ({
-        title:       f.title,
-        rawContent:  f.rawContent,
-        format:      f.format,
-        parentIndex: f.role === 'child' && f.parentUid
-          ? files.findIndex(x => x.uid === f.parentUid)
-          : undefined,
-      }))
+      // ── PDFs: upload one by one via FormData ──
+      const pdfFiles = files.filter(f => f.format === 'pdf')
+      for (const pf of pdfFiles) {
+        setFiles(prev => prev.map(f => f.uid === pf.uid ? { ...f, status: 'importing' } : f))
+        try {
+          const fd = new FormData()
+          fd.append('file', pf.pdfFile!)
+          fd.append('contextType', selectedCtx.type)
+          fd.append('contextId', selectedCtx.id)
+          fd.append('title', pf.title)
+          const res = await fetch('/api/docs/import-pdf', { method: 'POST', body: fd, credentials: 'include' })
+          const data = await res.json()
+          if (res.ok) {
+            if (!firstPageId) firstPageId = data.pageId
+            setFiles(prev => prev.map(f => f.uid === pf.uid
+              ? { ...f, status: 'done', statusMsg: `✓ ${data.blocksCreated} bloques · ${data.pagesInPdf} pág.` }
+              : f
+            ))
+          } else {
+            setFiles(prev => prev.map(f => f.uid === pf.uid
+              ? { ...f, status: 'error', statusMsg: data.error ?? 'Error al importar' }
+              : f
+            ))
+          }
+        } catch {
+          setFiles(prev => prev.map(f => f.uid === pf.uid ? { ...f, status: 'error', statusMsg: 'Error de red' } : f))
+        }
+      }
 
-      const result = await api.post<{ created: { title: string; id: string }[]; firstPageId: string | null }>(
-        '/api/docs/import',
-        { contextType: selectedCtx.type, contextId: selectedCtx.id, items }
-      )
+      // ── Markdown/CSV: batch import ──
+      const textFiles = files.filter(f => f.format !== 'pdf')
+      if (textFiles.length > 0) {
+        // Mark text files as importing
+        setFiles(prev => prev.map(f => f.format !== 'pdf' ? { ...f, status: 'importing' } : f))
+        const items = textFiles.map(f => ({
+          title:       f.title,
+          rawContent:  f.rawContent,
+          format:      f.format as 'md' | 'csv',
+          parentIndex: f.role === 'child' && f.parentUid
+            ? files.findIndex(x => x.uid === f.parentUid)
+            : undefined,
+        }))
 
-      if (result.firstPageId) {
-        onImported(result.firstPageId)
-      } else {
-        onClose()
+        const result = await api.post<{ created: { title: string; id: string }[]; failed: { title: string; id: null }[]; firstPageId: string | null }>(
+          '/api/docs/import',
+          { contextType: selectedCtx.type, contextId: selectedCtx.id, items }
+        )
+
+        if (!firstPageId && result.firstPageId) firstPageId = result.firstPageId
+        const createdTitles = new Set(result.created.map(c => c.title))
+        setFiles(prev => prev.map(f => {
+          if (f.format === 'pdf') return f
+          return createdTitles.has(f.title)
+            ? { ...f, status: 'done' as const }
+            : { ...f, status: 'error' as const, statusMsg: 'No se pudo crear' }
+        }))
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Error al importar')
+      setFiles(prev => prev.map(f => f.status === 'importing' ? { ...f, status: 'error', statusMsg: 'Error inesperado' } : f))
     } finally {
       setImporting(false)
+      // Navigate to first created page after a short delay so user sees statuses
+      if (firstPageId) {
+        setTimeout(() => onImported(firstPageId!), 800)
+      }
     }
   }
 
@@ -217,8 +287,8 @@ export function NotionImportModal({ contexts, onClose, onImported }: NotionImpor
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-base select-none">N</div>
             <div>
-              <h2 className="text-sm font-semibold text-slate-900">Importar desde Notion</h2>
-              <p className="text-xs text-slate-400">Sube archivos .md o .csv exportados de Notion</p>
+              <h2 className="text-sm font-semibold text-slate-900">Importar documentos</h2>
+              <p className="text-xs text-slate-400">Sube archivos .md, .csv de Notion o .pdf</p>
             </div>
           </div>
           <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-100 text-slate-400 transition-colors">
@@ -285,10 +355,12 @@ export function NotionImportModal({ contexts, onClose, onImported }: NotionImpor
                 <div key={f.uid} className={`border rounded-xl p-4 transition-colors ${f.role === 'child' ? 'border-slate-200 bg-slate-50/60 ml-5 border-l-4 border-l-[#17394f]/20' : 'border-slate-200 bg-white'}`}>
                   <div className="flex items-start gap-3">
                     {/* File type icon */}
-                    <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0 mt-0.5">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${f.format === 'pdf' ? 'bg-red-50' : 'bg-slate-100'}`}>
                       {f.format === 'csv'
                         ? <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                        : <FileText className="w-4 h-4 text-[#17394f]" />}
+                        : f.format === 'pdf'
+                          ? <FileType className="w-4 h-4 text-red-500" />
+                          : <FileText className="w-4 h-4 text-[#17394f]" />}
                     </div>
 
                     <div className="flex-1 min-w-0 space-y-2.5">
@@ -301,41 +373,53 @@ export function NotionImportModal({ contexts, onClose, onImported }: NotionImpor
                         className="w-full text-sm font-medium border-b border-transparent focus:border-slate-300 bg-transparent outline-none text-slate-800 placeholder:text-slate-300 transition-colors py-0.5"
                       />
 
-                      {/* Filename label + format badge */}
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-slate-400 truncate">{f.filename}</span>
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide ${f.format === 'csv' ? 'bg-emerald-50 text-emerald-600' : 'bg-blue-50 text-blue-600'}`}>
+                      {/* Filename label + format badge + status */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[10px] text-slate-400 truncate max-w-[180px]">{f.filename}</span>
+                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide shrink-0 ${
+                          f.format === 'csv' ? 'bg-emerald-50 text-emerald-600'
+                          : f.format === 'pdf' ? 'bg-red-50 text-red-600'
+                          : 'bg-blue-50 text-blue-600'
+                        }`}>
                           {f.format}
                         </span>
+                        {f.status === 'importing' && <Loader2 className="w-3 h-3 animate-spin text-slate-400 shrink-0" />}
+                        {f.status === 'done' && <span className="text-[10px] text-emerald-600 font-medium shrink-0">✓ {f.statusMsg ?? 'Importado'}</span>}
+                        {f.status === 'error' && <span className="text-[10px] text-red-500 font-medium shrink-0">✗ {f.statusMsg ?? 'Error'}</span>}
                       </div>
 
-                      {/* Role selector */}
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <div className="flex items-center bg-slate-100 rounded-lg p-0.5">
-                          <button
-                            onClick={() => updateFile(f.uid, { role: 'root', parentUid: null })}
-                            className={`text-xs px-2.5 py-1 rounded-md font-medium transition-all ${f.role === 'root' ? 'bg-white text-[#17394f] shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                          >
-                            Página raíz
-                          </button>
-                          <button
-                            onClick={() => updateFile(f.uid, { role: 'child' })}
-                            className={`text-xs px-2.5 py-1 rounded-md font-medium transition-all ${f.role === 'child' ? 'bg-white text-[#17394f] shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                          >
-                            Subpágina
-                          </button>
-                        </div>
-                        {f.role === 'child' && (
-                          <div className="flex-1 min-w-[160px]">
-                            <ParentSelect
-                              files={files}
-                              currentUid={f.uid}
-                              value={f.parentUid}
-                              onChange={uid => updateFile(f.uid, { parentUid: uid })}
-                            />
+                      {/* Role selector — PDFs are always root */}
+                      {f.format !== 'pdf' && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <div className="flex items-center bg-slate-100 rounded-lg p-0.5">
+                            <button
+                              onClick={() => updateFile(f.uid, { role: 'root', parentUid: null })}
+                              className={`text-xs px-2.5 py-1 rounded-md font-medium transition-all ${f.role === 'root' ? 'bg-white text-[#17394f] shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                              Página raíz
+                            </button>
+                            <button
+                              onClick={() => updateFile(f.uid, { role: 'child' })}
+                              className={`text-xs px-2.5 py-1 rounded-md font-medium transition-all ${f.role === 'child' ? 'bg-white text-[#17394f] shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                            >
+                              Subpágina
+                            </button>
                           </div>
-                        )}
-                      </div>
+                          {f.role === 'child' && (
+                            <div className="flex-1 min-w-[160px]">
+                              <ParentSelect
+                                files={files}
+                                currentUid={f.uid}
+                                value={f.parentUid}
+                                onChange={uid => updateFile(f.uid, { parentUid: uid })}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {f.format === 'pdf' && (
+                        <p className="text-[10px] text-slate-400">PDF · siempre se crea como página raíz</p>
+                      )}
                     </div>
 
                     {/* Actions */}

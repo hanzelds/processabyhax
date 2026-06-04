@@ -1,5 +1,6 @@
 import { Resend } from 'resend'
 import { getSettings, emailEnabled } from './settings'
+import { prisma } from './prisma'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
@@ -346,10 +347,10 @@ export async function sendBriefStatusEmail(params: {
 
   let to: string[] = []
   if (status === 'revision_interna' || status === 'entregado') {
-    const users = await (await import('../lib/prisma')).prisma.user.findMany({ where: { role: { in: ['ADMIN', 'LEAD'] }, status: 'ACTIVE' }, select: { email: true } })
+    const users = await prisma.user.findMany({ where: { role: { in: ['ADMIN', 'LEAD'] }, status: 'ACTIVE' }, select: { email: true } })
     to = users.map(u => u.email)
   } else if (status === 'aprobacion_cliente') {
-    const users = await (await import('../lib/prisma')).prisma.user.findMany({ where: { role: 'ADMIN', status: 'ACTIVE' }, select: { email: true } })
+    const users = await prisma.user.findMany({ where: { role: 'ADMIN', status: 'ACTIVE' }, select: { email: true } })
     to = users.map(u => u.email)
   } else if (status === 'aprobado') {
     // Only notify assignees who have accepted their invitation

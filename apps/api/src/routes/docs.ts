@@ -1,8 +1,11 @@
 import { Router } from 'express'
 import { prisma } from '../lib/prisma'
-import { isAuth } from '../middleware/auth'
+import { isAuth, requirePermission } from '../middleware/auth'
 import { v4 as uuidv4 } from 'uuid'
 import { createNotification } from '../lib/notify'
+import multer from 'multer'
+import pdfParse from 'pdf-parse'
+import puppeteer from 'puppeteer'
 
 export const docsRouter = Router()
 
@@ -619,6 +622,19 @@ docsRouter.delete('/pages/:id', isAuth, async (req, res) => {
   }
 })
 
+// ── GET /api/docs/public/:token — fetch shared page (no auth, MUST be before generic) ─
+docsRouter.get('/public/:token', async (req, res) => {
+  const share = await prisma.docPageShare.findUnique({ where: { token: req.params.token } })
+  if (!share) { res.status(404).json({ error: 'Enlace no válido' }); return }
+  if (share.expiresAt && share.expiresAt < new Date()) { res.status(410).json({ error: 'Este enlace ha expirado' }); return }
+  const page = await prisma.docPage.findUnique({
+    where:  { id: share.pageId },
+    select: { id: true, title: true, icon: true, content: true, fullWidth: true, createdAt: true, updatedAt: true },
+  })
+  if (!page) { res.status(404).json({ error: 'Página no encontrada' }); return }
+  res.json({ ...page, allowComments: share.allowComments, shareToken: share.token })
+})
+
 // ── GET /api/docs/:contextType/:contextId — page tree (MUST be last GET) ─────
 
 docsRouter.get('/:contextType/:contextId', isAuth, async (req, res) => {
@@ -640,6 +656,78 @@ docsRouter.get('/:contextType/:contextId', isAuth, async (req, res) => {
     console.error(e); res.status(500).json({ error: 'Error al cargar páginas' })
   }
 })
+
+// ── PDF helpers ───────────────────────────────────────────────────────────────
+
+const pdfUpload = multer({
+  storage: multer.memoryStorage(),
+  limits:  { fileSize: 20 * 1024 * 1024 }, // 20 MB
+  fileFilter: (_req, file, cb) => { cb(null, file.mimetype === 'application/pdf') },
+})
+
+function pdfToBlocks(text: string): object[] {
+  const blocks: object[] = []
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i].trim()
+    i++
+    if (!line) continue
+
+    const nextLine = (lines[i] ?? '').trim()
+
+    // All-caps short line → heading (common in PDFs for section titles)
+    const isAllCaps = line === line.toUpperCase() && line.length >= 3 && /[A-Z]/.test(line) && line.length < 100
+    // Short line not ending in sentence-terminal punctuation, followed by blank or longer line
+    const isShortTitle = line.length < 80 &&
+      !line.endsWith('.') && !line.endsWith(',') && !line.endsWith(';') && !line.endsWith(':') &&
+      (nextLine === '' || nextLine.length > line.length) &&
+      line.split(' ').length <= 10
+
+    if (isAllCaps || isShortTitle) {
+      blocks.push({ id: uuidv4(), type: 'heading_2', content: { html: mdInlineToHtml(line) } })
+      continue
+    }
+
+    // Bullet patterns: -, *, •, –, ·
+    if (/^[-*•–·]\s+/.test(line)) {
+      const text = mdInlineToHtml(line.replace(/^[-*•–·]\s+/, ''))
+      // Merge consecutive bullets into one block
+      const prev = blocks[blocks.length - 1] as any
+      if (prev?.type === 'bulleted_list') {
+        prev.content.items.push(text)
+      } else {
+        blocks.push({ id: uuidv4(), type: 'bulleted_list', content: { items: [text] } })
+      }
+      continue
+    }
+
+    // Numbered list: "1. " "2) "
+    if (/^\d+[\.\)]\s+/.test(line)) {
+      const text = mdInlineToHtml(line.replace(/^\d+[\.\)]\s+/, ''))
+      const prev = blocks[blocks.length - 1] as any
+      if (prev?.type === 'numbered_list') {
+        prev.content.items.push(text)
+      } else {
+        blocks.push({ id: uuidv4(), type: 'numbered_list', content: { items: [text] } })
+      }
+      continue
+    }
+
+    // Paragraph — merge with previous paragraph if no blank line between
+    const html = mdInlineToHtml(line)
+    const prev = blocks[blocks.length - 1] as any
+    if (prev?.type === 'paragraph' && nextLine !== '') {
+      prev.content.html += ' ' + html
+    } else {
+      blocks.push({ id: uuidv4(), type: 'paragraph', content: { html } })
+    }
+  }
+
+  if (blocks.length === 0) blocks.push({ id: uuidv4(), type: 'paragraph', content: { html: '' } })
+  return blocks
+}
 
 // ── POST /api/docs/import — import pages from Notion export ──────────────────
 
@@ -827,60 +915,142 @@ docsRouter.post('/import', isAuth, async (req, res) => {
     const rootIndices     = items.map((it, i) => ({ it, i })).filter(({ it }) => it.parentIndex === undefined)
     const childrenIndices = items.map((it, i) => ({ it, i })).filter(({ it }) => it.parentIndex !== undefined)
 
-    for (const { it, i } of rootIndices) {
-      const content = it.format === 'csv'
-        ? parseCsvToBlocks(it.rawContent)
-        : parseMarkdownToBlocks(it.rawContent)
+    const MAX_CONTENT_BYTES = 500_000 // 500 KB per page
 
-      const page = await prisma.docPage.create({
-        data: {
-          title:       it.title || 'Sin título',
-          icon:        it.icon || null,
-          contextType,
-          contextId,
-          sortOrder:   nextRootSort++,
-          content:     content as object[],
-          createdById: userId,
-        },
-        select: { id: true },
-      })
-      createdIds[i] = page.id
+    for (const { it, i } of rootIndices) {
+      if (typeof it.rawContent === 'string' && Buffer.byteLength(it.rawContent, 'utf8') > MAX_CONTENT_BYTES) {
+        console.warn(`[docs/import] Item ${i} "${it.title}" excede 500 KB — omitido`)
+        continue
+      }
+      try {
+        const content = it.format === 'csv'
+          ? parseCsvToBlocks(it.rawContent)
+          : parseMarkdownToBlocks(it.rawContent)
+        const page = await prisma.docPage.create({
+          data: {
+            title:       it.title || 'Sin título',
+            icon:        it.icon || null,
+            contextType,
+            contextId,
+            sortOrder:   nextRootSort++,
+            content:     content as object[],
+            createdById: userId,
+          },
+          select: { id: true },
+        })
+        createdIds[i] = page.id
+      } catch (e) {
+        console.error(`[docs/import] Error creando página raíz ${i}:`, e)
+      }
     }
 
     for (const { it, i } of childrenIndices) {
       const parentId = it.parentIndex !== undefined ? createdIds[it.parentIndex] : null
       if (!parentId) continue // parent failed — skip
 
-      const childMaxSort = await prisma.docPage.aggregate({
-        where: { parentId },
-        _max: { sortOrder: true },
-      })
-      const childSort = (childMaxSort._max.sortOrder ?? -1) + 1
+      if (typeof it.rawContent === 'string' && Buffer.byteLength(it.rawContent, 'utf8') > MAX_CONTENT_BYTES) {
+        console.warn(`[docs/import] Item ${i} "${it.title}" excede 500 KB — omitido`)
+        continue
+      }
+      try {
+        const childMaxSort = await prisma.docPage.aggregate({
+          where: { parentId },
+          _max: { sortOrder: true },
+        })
+        const childSort = (childMaxSort._max.sortOrder ?? -1) + 1
 
-      const content = it.format === 'csv'
-        ? parseCsvToBlocks(it.rawContent)
-        : parseMarkdownToBlocks(it.rawContent)
-
-      const page = await prisma.docPage.create({
-        data: {
-          title:       it.title || 'Sin título',
-          icon:        it.icon || null,
-          contextType,
-          contextId,
-          parentId,
-          sortOrder:   childSort,
-          content:     content as object[],
-          createdById: userId,
-        },
-        select: { id: true },
-      })
-      createdIds[i] = page.id
+        const content = it.format === 'csv'
+          ? parseCsvToBlocks(it.rawContent)
+          : parseMarkdownToBlocks(it.rawContent)
+        const page = await prisma.docPage.create({
+          data: {
+            title:       it.title || 'Sin título',
+            icon:        it.icon || null,
+            contextType,
+            contextId,
+            parentId,
+            sortOrder:   childSort,
+            content:     content as object[],
+            createdById: userId,
+          },
+          select: { id: true },
+        })
+        createdIds[i] = page.id
+      } catch (e) {
+        console.error(`[docs/import] Error creando subpágina ${i}:`, e)
+      }
     }
 
     const created = items.map((it, i) => ({ title: it.title, id: createdIds[i] })).filter(p => p.id)
-    res.status(201).json({ created, firstPageId: created[0]?.id ?? null })
+    const failed  = items.map((it, i) => ({ title: it.title, id: createdIds[i] })).filter(p => !p.id)
+    res.status(failed.length === 0 ? 201 : 207).json({
+      created,
+      failed,
+      firstPageId: created[0]?.id ?? null,
+    })
   } catch (e) {
     console.error(e); res.status(500).json({ error: 'Error al importar páginas' })
+  }
+})
+
+// ── POST /api/docs/import-pdf — import single PDF ────────────────────────────
+
+docsRouter.post('/import-pdf', isAuth, pdfUpload.single('file'), async (req, res) => {
+  if (!req.file) { res.status(400).json({ error: 'Archivo PDF requerido' }); return }
+
+  const { contextType, contextId, title } = req.body as Record<string, string>
+  if (!VALID_CONTEXT_TYPES.includes(contextType)) {
+    res.status(400).json({ error: 'contextType inválido' }); return
+  }
+  if (!contextId) {
+    res.status(400).json({ error: 'contextId requerido' }); return
+  }
+
+  let data: Awaited<ReturnType<typeof pdfParse>>
+  try {
+    data = await pdfParse(req.file.buffer)
+  } catch {
+    res.status(422).json({ error: 'No se pudo leer el PDF. Verifica que no esté protegido con contraseña.' }); return
+  }
+
+  const rawText = data.text ?? ''
+  if (!rawText.trim()) {
+    res.status(422).json({ error: 'El PDF no contiene texto extraíble. Puede ser un PDF de imágenes o escaneado.' }); return
+  }
+
+  const blocks = pdfToBlocks(rawText)
+  const pageTitle = title?.trim() ||
+    req.file.originalname.replace(/\.pdf$/i, '').replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim() ||
+    'Documento PDF'
+
+  try {
+    const maxSort = await prisma.docPage.aggregate({
+      where: { contextType, contextId, parentId: null },
+      _max:  { sortOrder: true },
+    })
+
+    const page = await prisma.docPage.create({
+      data: {
+        title:       pageTitle,
+        icon:        '📄',
+        content:     blocks as object[],
+        contextType,
+        contextId,
+        sortOrder:   (maxSort._max.sortOrder ?? -1) + 1,
+        createdById: req.user!.userId,
+      },
+      select: { id: true, title: true },
+    })
+
+    res.status(201).json({
+      pageId:      page.id,
+      title:       page.title,
+      blocksCreated: blocks.length,
+      pagesInPdf:  data.numpages,
+    })
+  } catch (e) {
+    console.error('[docs/import-pdf]', e)
+    res.status(500).json({ error: 'Error al crear la página' })
   }
 })
 
@@ -915,4 +1085,302 @@ docsRouter.post('/:contextType/:contextId', isAuth, async (req, res) => {
   } catch (e) {
     console.error(e); res.status(500).json({ error: 'Error al crear página' })
   }
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 1: Duplicate page + Export
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── POST /pages/:id/duplicate ─────────────────────────────────────────
+docsRouter.post('/pages/:id/duplicate', isAuth, async (req, res) => {
+  const src = await prisma.docPage.findUnique({
+    where: { id: req.params.id },
+    include: { children: { orderBy: { sortOrder: 'asc' }, include: { children: true } } },
+  })
+  if (!src) { res.status(404).json({ error: 'Página no encontrada' }); return }
+
+  async function copyPage(orig: typeof src, parentId: string | null, sortOffset: number) {
+    const maxSort = await prisma.docPage.aggregate({
+      where: { contextType: orig.contextType, contextId: orig.contextId, parentId },
+      _max: { sortOrder: true },
+    })
+    const page = await prisma.docPage.create({
+      data: {
+        title:       `Copia de ${orig.title}`,
+        icon:        orig.icon,
+        cover:       orig.cover,
+        contextType: orig.contextType,
+        contextId:   orig.contextId,
+        parentId,
+        sortOrder:   (maxSort._max.sortOrder ?? -1) + 1 + sortOffset,
+        content:     orig.content as object[],
+        fullWidth:   orig.fullWidth,
+        createdById: req.user!.userId,
+      },
+      select: { id: true, title: true },
+    })
+    return page
+  }
+
+  const copy = await copyPage(src, src.parentId, 1)
+
+  // Recurse children
+  for (const child of (src as any).children ?? []) {
+    await copyPage({ ...child } as typeof src, copy.id, 0)
+  }
+
+  res.status(201).json({ pageId: copy.id, title: copy.title })
+})
+
+// ── PDF export helpers ────────────────────────────────────────────────
+function escHtmlPdf(s: string) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+}
+
+function blocksToHtml(blocks: any[]): string {
+  function blockHtml(b: any): string {
+    const c = b.content ?? {}
+    switch (b.type) {
+      case 'heading_1': return `<h1>${c.html ?? ''}</h1>`
+      case 'heading_2': return `<h2>${c.html ?? ''}</h2>`
+      case 'heading_3': return `<h3>${c.html ?? ''}</h3>`
+      case 'paragraph': return `<p>${c.html ?? ''}</p>`
+      case 'quote':     return `<blockquote>${c.html ?? ''}</blockquote>`
+      case 'callout':   return `<div class="callout"><span class="callout-icon">${c.icon ?? '💡'}</span><div>${c.html ?? ''}</div></div>`
+      case 'divider':   return `<hr/>`
+      case 'code':      return `<pre><code class="language-${c.language ?? ''}">${escHtmlPdf(c.text ?? '')}</code></pre>`
+      case 'bulleted_list': return `<ul>${(c.items ?? []).map((i: string) => `<li>${i}</li>`).join('')}</ul>`
+      case 'numbered_list': return `<ol>${(c.items ?? []).map((i: string) => `<li>${i}</li>`).join('')}</ol>`
+      case 'toggle':    return `<div class="toggle"><div class="toggle-header">${c.html ?? ''}</div><div class="toggle-body">${(c.children ?? []).map(blockHtml).join('')}</div></div>`
+      case 'image':     return c.url ? `<figure><img src="${c.url}" alt="${c.caption ?? ''}"/>${c.caption ? `<figcaption>${c.caption}</figcaption>` : ''}</figure>` : ''
+      case 'video':     return c.url ? `<div class="media-note">▶ Video: <a href="${c.url}">${c.url}</a></div>` : ''
+      case 'embed':     return c.url ? `<div class="media-note">⊕ ${c.service ?? 'Embed'}: <a href="${c.url}">${c.url}</a></div>` : ''
+      case 'child_page': return `<div class="child-page">${c.pageIcon ?? '📄'} ${c.title ?? ''}</div>`
+      case 'table': {
+        const headers: string[] = c.headers ?? []
+        const rows: string[][] = c.rows ?? []
+        return `<table><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map((r: string[]) => `<tr>${r.map(cell => `<td>${cell}</td>`).join('')}</tr>`).join('')}</tbody></table>`
+      }
+      default: return ''
+    }
+  }
+  return blocks.map(blockHtml).join('\n')
+}
+
+function buildPdfHtml(title: string, icon: string | null, bodyHtml: string): string {
+  return `<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"/>
+<style>
+  @page { size: A4; margin: 2.2cm 2.5cm; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Georgia, 'Times New Roman', serif; font-size: 11pt; line-height: 1.7; color: #1a1a1a; }
+  h1 { font-size: 24pt; font-weight: 700; margin: 0 0 6pt; }
+  h2 { font-size: 16pt; font-weight: 600; margin: 18pt 0 6pt; border-bottom: 1px solid #e5e7eb; padding-bottom: 4pt; }
+  h3 { font-size: 13pt; font-weight: 600; margin: 14pt 0 4pt; }
+  p  { margin: 0 0 8pt; }
+  ul, ol { padding-left: 1.4em; margin: 0 0 8pt; }
+  li { margin-bottom: 3pt; }
+  blockquote { border-left: 3pt solid #94a3b8; padding-left: 12pt; color: #475569; margin: 10pt 0; font-style: italic; }
+  pre { background: #f8fafc; border: 1pt solid #e2e8f0; border-radius: 4pt; padding: 8pt 10pt; font-family: 'Courier New', monospace; font-size: 9pt; white-space: pre-wrap; word-break: break-all; margin: 8pt 0; }
+  code { font-family: 'Courier New', monospace; background: #f1f5f9; padding: 1pt 3pt; border-radius: 2pt; font-size: 9.5pt; }
+  hr { border: none; border-top: 1pt solid #e2e8f0; margin: 14pt 0; }
+  table { width: 100%; border-collapse: collapse; margin: 10pt 0; font-size: 10pt; }
+  th { background: #f8fafc; font-weight: 600; text-align: left; padding: 5pt 8pt; border: 1pt solid #e2e8f0; }
+  td { padding: 5pt 8pt; border: 1pt solid #e2e8f0; vertical-align: top; }
+  figure { margin: 10pt 0; text-align: center; }
+  img { max-width: 100%; height: auto; border-radius: 4pt; }
+  figcaption { font-size: 9pt; color: #64748b; margin-top: 4pt; font-style: italic; }
+  .callout { background: #f8fafc; border: 1pt solid #e2e8f0; border-radius: 6pt; padding: 10pt 12pt; margin: 10pt 0; display: flex; gap: 8pt; align-items: flex-start; }
+  .callout-icon { font-size: 14pt; line-height: 1.4; flex-shrink: 0; }
+  .toggle { margin: 6pt 0; }
+  .toggle-header { font-weight: 500; }
+  .toggle-body { margin-top: 4pt; border-left: 2pt solid #e2e8f0; padding-left: 10pt; }
+  .child-page { background: #f8fafc; border: 1pt solid #e2e8f0; border-radius: 4pt; padding: 6pt 10pt; margin: 6pt 0; font-size: 10pt; color: #475569; }
+  .media-note { background: #fefce8; border: 1pt solid #fde68a; border-radius: 4pt; padding: 6pt 10pt; margin: 6pt 0; font-size: 9.5pt; color: #92400e; }
+  .doc-title { margin-bottom: 24pt; padding-bottom: 14pt; border-bottom: 2pt solid #1a1a1a; }
+  a { color: #4f46e5; }
+  h1, h2, h3 { page-break-after: avoid; }
+  pre, table, figure { page-break-inside: avoid; }
+</style>
+</head><body>
+<div class="doc-title">
+  ${icon ? `<div style="font-size:32pt;margin-bottom:8pt">${icon}</div>` : ''}
+  <h1>${title}</h1>
+</div>
+${bodyHtml}
+</body></html>`
+}
+
+// ── GET /pages/:id/export?format=md|pdf ──────────────────────────────
+docsRouter.get('/pages/:id/export', isAuth, async (req, res) => {
+  const page = await prisma.docPage.findUnique({
+    where: { id: req.params.id },
+    select: { title: true, icon: true, content: true },
+  })
+  if (!page) { res.status(404).json({ error: 'Página no encontrada' }); return }
+
+  const format = (req.query.format as string) || 'md'
+  const blocks = (page.content as any[]) ?? []
+
+  // ── PDF branch ──────────────────────────────────────────────────────
+  if (format === 'pdf') {
+    const bodyHtml = blocksToHtml(blocks)
+    const html = buildPdfHtml(page.title, page.icon ?? null, bodyHtml)
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    })
+    try {
+      const tab = await browser.newPage()
+      await tab.setContent(html, { waitUntil: 'networkidle0' })
+      const pdf = await tab.pdf({ format: 'A4', printBackground: true })
+      const safeName = page.title.replace(/[^\w\s\-áéíóúÁÉÍÓÚñÑ]/g, '').trim() || 'documento'
+      res.setHeader('Content-Type', 'application/pdf')
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.pdf"`)
+      res.send(Buffer.from(pdf))
+    } catch (e) {
+      console.error('[docs/export/pdf]', e)
+      res.status(500).json({ error: 'Error generando PDF' })
+    } finally {
+      await browser.close()
+    }
+    return
+  }
+
+  function blockToMd(b: any): string {
+    const html2text = (h: string) => (h ?? '').replace(/<[^>]*>/g, '').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"')
+    switch (b.type) {
+      case 'heading_1':     return `# ${html2text(b.content?.html)}\n`
+      case 'heading_2':     return `## ${html2text(b.content?.html)}\n`
+      case 'heading_3':     return `### ${html2text(b.content?.html)}\n`
+      case 'paragraph':     return `${html2text(b.content?.html)}\n`
+      case 'quote':         return `> ${html2text(b.content?.html)}\n`
+      case 'callout':       return `> ${b.content?.icon ?? '💡'} ${html2text(b.content?.html)}\n`
+      case 'bulleted_list': return (b.content?.items ?? []).map((i: string) => `- ${i}`).join('\n') + '\n'
+      case 'numbered_list': return (b.content?.items ?? []).map((i: string, idx: number) => `${idx+1}. ${i}`).join('\n') + '\n'
+      case 'divider':       return `---\n`
+      case 'code':          return `\`\`\`${b.content?.language ?? ''}\n${b.content?.text ?? ''}\n\`\`\`\n`
+      case 'image':         return `![${b.content?.caption ?? ''}](${b.content?.url ?? ''})\n`
+      case 'video':         return `[Video](${b.content?.url ?? ''})\n`
+      case 'embed':         return `[Embed: ${b.content?.service ?? ''}](${b.content?.url ?? ''})\n`
+      case 'toggle':        return `**${html2text(b.content?.html)}**\n${(b.content?.children ?? []).map((c: any) => `  ${blockToMd(c)}`).join('')}`
+      case 'table': {
+        const headers: string[] = b.content?.headers ?? []
+        const rows: string[][] = b.content?.rows ?? []
+        const head = `| ${headers.join(' | ')} |`
+        const sep  = `| ${headers.map(() => '---').join(' | ')} |`
+        const body = rows.map((r: string[]) => `| ${r.join(' | ')} |`).join('\n')
+        return `${head}\n${sep}\n${body}\n`
+      }
+      default: return ''
+    }
+  }
+
+  const md = `# ${page.title}\n\n${blocks.map(blockToMd).join('\n')}`
+
+  res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
+  res.setHeader('Content-Disposition', `attachment; filename="${page.title.replace(/[^a-zA-Z0-9]/g,'-')}.md"`)
+  res.send(md)
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 2: Comments
+// ═══════════════════════════════════════════════════════════════════════
+
+const COMMENT_INCLUDE = {
+  author: { select: { id: true, name: true, avatarUrl: true } },
+  replies: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { author: { select: { id: true, name: true, avatarUrl: true } } },
+  },
+}
+
+// GET /pages/:id/comments
+docsRouter.get('/pages/:id/comments', isAuth, async (req, res) => {
+  const comments = await prisma.docComment.findMany({
+    where: { pageId: req.params.id, parentId: null },
+    include: COMMENT_INCLUDE,
+    orderBy: { createdAt: 'asc' },
+  })
+  res.json(comments)
+})
+
+// POST /pages/:id/comments
+docsRouter.post('/pages/:id/comments', isAuth, async (req, res) => {
+  const { content, blockId, parentId } = req.body
+  if (!content?.trim()) { res.status(400).json({ error: 'Contenido requerido' }); return }
+  const comment = await prisma.docComment.create({
+    data: { pageId: req.params.id, content: content.trim(), blockId: blockId || null, parentId: parentId || null, authorId: req.user!.userId },
+    include: COMMENT_INCLUDE,
+  })
+  res.status(201).json(comment)
+})
+
+// PATCH /pages/:id/comments/:commentId
+docsRouter.patch('/pages/:id/comments/:commentId', isAuth, async (req, res) => {
+  const existing = await prisma.docComment.findUnique({ where: { id: req.params.commentId } })
+  if (!existing || existing.pageId !== req.params.id) { res.status(404).json({ error: 'Comentario no encontrado' }); return }
+  const data: Record<string, unknown> = {}
+  if (req.body.content !== undefined) data.content = req.body.content
+  if (req.body.resolved !== undefined) data.resolved = req.body.resolved
+  const comment = await prisma.docComment.update({ where: { id: req.params.commentId }, data, include: COMMENT_INCLUDE })
+  res.json(comment)
+})
+
+// DELETE /pages/:id/comments/:commentId
+docsRouter.delete('/pages/:id/comments/:commentId', isAuth, async (req, res) => {
+  const existing = await prisma.docComment.findUnique({ where: { id: req.params.commentId } })
+  if (!existing || existing.pageId !== req.params.id) { res.status(404).json({ error: 'Comentario no encontrado' }); return }
+  if (existing.authorId !== req.user!.userId && req.user!.role !== 'ADMIN') { res.status(403).json({ error: 'Sin permiso' }); return }
+  await prisma.docComment.delete({ where: { id: req.params.commentId } })
+  res.json({ ok: true })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 2: Public sharing
+// ═══════════════════════════════════════════════════════════════════════
+
+// POST /pages/:id/share — create share link
+docsRouter.post('/pages/:id/share', isAuth, async (req, res) => {
+  const { allowComments = false, expiresAt } = req.body
+  const token = uuidv4().replace(/-/g, '')
+  const share = await prisma.docPageShare.create({
+    data: {
+      pageId: req.params.id,
+      token,
+      createdById: req.user!.userId,
+      allowComments,
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+    },
+  })
+  res.status(201).json({ token: share.token, url: `/docs/public/${share.token}` })
+})
+
+// GET /pages/:id/shares — list active shares
+docsRouter.get('/pages/:id/shares', isAuth, async (req, res) => {
+  const shares = await prisma.docPageShare.findMany({
+    where: { pageId: req.params.id },
+    orderBy: { createdAt: 'desc' },
+  })
+  res.json(shares)
+})
+
+// DELETE /pages/:id/shares/:token — revoke share
+docsRouter.delete('/pages/:id/shares/:token', isAuth, async (req, res) => {
+  await prisma.docPageShare.deleteMany({ where: { pageId: req.params.id, token: req.params.token } })
+  res.json({ ok: true })
+})
+
+// ═══════════════════════════════════════════════════════════════════════
+// PHASE 2: Backlinks
+// ═══════════════════════════════════════════════════════════════════════
+
+// GET /pages/:id/backlinks
+docsRouter.get('/pages/:id/backlinks', isAuth, async (req, res) => {
+  const links = await prisma.docBacklink.findMany({
+    where: { targetId: req.params.id },
+    include: { source: { select: { id: true, title: true, icon: true, contextType: true, contextId: true } } },
+    orderBy: { createdAt: 'desc' },
+  })
+  res.json(links.map(l => l.source))
 })

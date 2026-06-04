@@ -14,6 +14,11 @@ export function makeBlock(type: DocBlockType = 'paragraph'): DocBlock {
     code:          { language: 'javascript', text: '' },
     image:         { url: '', caption: '' },
     child_page:    { pageId: '', title: 'Sin título', pageIcon: '📄' },
+    table:         { headers: ['Columna 1', 'Columna 2', 'Columna 3'], rows: [['', '', '']] },
+    toggle:        { html: '', open: true, children: [] },
+    quote:         { html: '' },
+    embed:         { url: '', service: '', caption: '' },
+    video:         { url: '', caption: '' },
   }
   return { id, type, content: defaults[type] }
 }
@@ -42,8 +47,9 @@ export function placeCursorAtStart(el: HTMLElement) {
 
 export function isBlockEmpty(block: DocBlock): boolean {
   if (block.type === 'divider') return false
-  if (block.type === 'image') return !block.content.url
+  if (block.type === 'image' || block.type === 'video') return !block.content.url
   if (block.type === 'code') return !block.content.text?.trim()
+  if (block.type === 'table' || block.type === 'embed') return false
   if (block.type === 'bulleted_list' || block.type === 'numbered_list') {
     return (block.content.items ?? []).every(i => !i.trim())
   }
@@ -63,4 +69,9 @@ export const BLOCK_LABELS: Record<DocBlockType, { label: string; description: st
   code:          { label: 'Código',       description: 'Bloque de código con sintaxis',  icon: '<>', shortcut: '/cod' },
   image:         { label: 'Imagen',       description: 'Imagen con caption',             icon: '🖼', shortcut: '/ima' },
   child_page:    { label: 'Sub-página',   description: 'Enlace a una página anidada',   icon: '📄', shortcut: '/pag' },
+  table:         { label: 'Tabla',        description: 'Tabla con filas y columnas',     icon: '⊞',  shortcut: '/tab' },
+  toggle:        { label: 'Toggle',       description: 'Bloque colapsable',              icon: '▶',  shortcut: '/tog' },
+  quote:         { label: 'Cita',         description: 'Cita o texto destacado',         icon: '"',  shortcut: '/cit' },
+  embed:         { label: 'Embed',        description: 'YouTube, Figma, Loom, Drive…',   icon: '⊕',  shortcut: '/emb' },
+  video:         { label: 'Video',        description: 'Video subido al servidor',       icon: '▶️',  shortcut: '/vid' },
 }

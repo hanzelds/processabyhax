@@ -15,6 +15,7 @@ import { Task, TaskStatus, User } from '@/types'
 import { KanbanColumn } from './KanbanColumn'
 import { KanbanCard } from './KanbanCard'
 import { api } from '@/lib/api'
+import { TASK_TYPE_COLOR, TASK_TYPE_LABEL } from '@/lib/utils'
 
 const COLUMNS: { id: TaskStatus; label: string; color: string }[] = [
   { id: 'PENDING',     label: 'Pendiente',    color: 'border-slate-200' },
@@ -129,8 +130,23 @@ export function KanbanBoard({ initialTasks, projectId, isAdmin, users = [], onTa
         ))}
       </div>
 
+      {/* DragOverlay: simple preview without useSortable to avoid duplicate id registration */}
       <DragOverlay>
-        {activeTask ? <KanbanCard task={activeTask} isDragging /> : null}
+        {activeTask ? (
+          <div className="bg-white border border-[#17394f]/30 rounded-xl px-3 py-2.5 shadow-lg opacity-90 rotate-1 cursor-grabbing w-72">
+            {activeTask.taskType && (
+              <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-full mb-1.5 ${TASK_TYPE_COLOR[activeTask.taskType]}`}>
+                {TASK_TYPE_LABEL[activeTask.taskType]}
+              </span>
+            )}
+            <p className="text-sm font-medium text-slate-800 truncate">{activeTask.title}</p>
+            {activeTask.assignees?.length > 0 && (
+              <p className="text-xs text-slate-400 mt-1 truncate">
+                {activeTask.assignees.map(a => a.name).join(', ')}
+              </p>
+            )}
+          </div>
+        ) : null}
       </DragOverlay>
     </DndContext>
   )

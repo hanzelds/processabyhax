@@ -39,7 +39,6 @@ export function UserProfileTab({ user: initialUser, skills: initialSkills, isAdm
     name:     user.name,
     email:    user.email,
     bio:      user.bio ?? '',
-    phone:    user.phone ?? '',
     area:     user.area ?? '',
     role:     user.role as Role,
     joinedAt: user.joinedAt ? user.joinedAt.substring(0, 10) : '',
@@ -49,8 +48,7 @@ export function UserProfileTab({ user: initialUser, skills: initialSkills, isAdm
     setSaving(true)
     try {
       const payload: Record<string, unknown> = {
-        bio:   form.bio   || null,
-        phone: form.phone || null,
+        bio: form.bio || null,
       }
       if (isAdmin) {
         payload.name     = form.name
@@ -177,15 +175,6 @@ export function UserProfileTab({ user: initialUser, skills: initialSkills, isAdm
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-slate-500 block mb-1">Teléfono</label>
-                {editing && (isAdmin || isOwnProfile) ? (
-                  <input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
-                ) : (
-                  <p className="text-sm text-slate-600">{user.phone || <span className="text-slate-400">—</span>}</p>
-                )}
-              </div>
               <div>
                 <label className="text-xs text-slate-500 block mb-1">Área</label>
                 {editing && isAdmin ? (

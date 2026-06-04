@@ -10,9 +10,11 @@ import { VersionHistoryPanel } from './VersionHistoryPanel'
 import { api } from '@/lib/api'
 import { DndContext, closestCenter, DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable'
-import { Star, Clock, ChevronDown, Check, Printer, MoreHorizontal, LayoutTemplate, X, Maximize2, Minimize2, Image as ImageIcon, Smile } from 'lucide-react'
+import { Star, Clock, ChevronDown, Check, Printer, MoreHorizontal, LayoutTemplate, X, Maximize2, Minimize2, Image as ImageIcon, Smile, MessageCircle, Share2, Link2, Copy, Download } from 'lucide-react'
 import { useToast } from '@/components/ui/Toast'
 import { DocTOC } from './DocTOC'
+import { CommentsPanel } from './CommentsPanel'
+import { ShareModal } from './ShareModal'
 
 // ── Debounce ──────────────────────────────────────────────────────────────────
 
@@ -165,9 +167,11 @@ interface Props {
   readOnly?: boolean
   onTitleChange?: (title: string) => void
   onPageCreated?: (newPageId: string, title: string) => void
+  isAdmin?: boolean
+  currentUserId?: string
 }
 
-export function DocEditor({ page, users = [], readOnly = false, onTitleChange, onPageCreated }: Props) {
+export function DocEditor({ page, users = [], readOnly = false, onTitleChange, onPageCreated, isAdmin = false, currentUserId = '' }: Props) {
   const [blocks, setBlocks] = useState<DocBlock[]>(
     (page.content ?? []).length > 0 ? page.content : [makeBlock('paragraph')]
   )
@@ -192,6 +196,10 @@ export function DocEditor({ page, users = [], readOnly = false, onTitleChange, o
   const [coverInputValue, setCoverInputValue] = useState(page.cover ?? '')
   const [fullWidth, setFullWidth]       = useState(page.fullWidth ?? false)
   const [titleHovered, setTitleHovered] = useState(false)
+  // Phase 2 — comments, share, backlinks
+  const [showComments, setShowComments] = useState(false)
+  const [showShare, setShowShare]       = useState(false)
+  const [backlinks, setBacklinks]       = useState<{ id: string; title: string; icon: string | null }[]>([])
 
   const blockRefs  = useRef<Map<string, HTMLElement>>(new Map())
   const titleRef   = useRef<HTMLDivElement>(null)
@@ -436,6 +444,39 @@ export function DocEditor({ page, users = [], readOnly = false, onTitleChange, o
     }
   }
 
+  async function handleDuplicate() {
+    setShowOptions(false)
+    try {
+      const res = await api.post<{ pageId: string; title: string }>(`/api/docs/pages/${page.id}/duplicate`, {})
+      toast.success('Página duplicada')
+      window.location.href = `/docs/${res.pageId}`
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Error al duplicar')
+    }
+  }
+
+  function handleExportMarkdown() {
+    setShowOptions(false)
+    window.open(`/api/docs/pages/${page.id}/export?format=md`, '_blank')
+  }
+
+  function handleExportPdf() {
+    setShowOptions(false)
+    const a = document.createElement('a')
+    a.href = `/api/docs/pages/${page.id}/export?format=pdf`
+    a.download = `${page.title || 'documento'}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }
+
+  // Load backlinks once
+  useEffect(() => {
+    api.get<{ id: string; title: string; icon: string | null }[]>(`/api/docs/pages/${page.id}/backlinks`)
+      .then(setBacklinks)
+      .catch(() => {})
+  }, [page.id])
+
   async function handleShowVersions() {
     setShowVersions(true)
     setVersionsLoading(true)
@@ -601,7 +642,7 @@ export function DocEditor({ page, users = [], readOnly = false, onTitleChange, o
 
       {/* Sticky top bar */}
       {!readOnly && (
-        <div className="flex items-center justify-between px-6 py-2 border-b border-slate-100 bg-white/80 backdrop-blur-sm shrink-0 print:hidden">
+        <div className="flex items-center justify-between px-6 py-2 border-b border-slate-100 bg-white shrink-0 print:hidden">
           <span className={`text-xs ${saveError ? 'text-red-500 font-medium' : 'text-slate-400'}`}>
             {saving ? 'Guardando…' : saveError ? '⚠ Error al guardar — Cmd+S para reintentar' : lastSaved ? relativeTime(lastSaved) : 'Sin guardar aún'}
           </span>
@@ -626,6 +667,24 @@ export function DocEditor({ page, users = [], readOnly = false, onTitleChange, o
               className={`p-1.5 rounded-lg transition-colors ${fullWidth ? 'text-[#17394f] bg-[#17394f]/8' : 'text-slate-300 hover:text-slate-600'}`}
             >
               {fullWidth ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            </button>
+
+            {/* Comments */}
+            <button
+              onClick={() => setShowComments(c => !c)}
+              title="Comentarios"
+              className={`p-1.5 rounded-lg transition-colors ${showComments ? 'text-[#17394f] bg-[#17394f]/8' : 'text-slate-300 hover:text-slate-600'}`}
+            >
+              <MessageCircle className="w-4 h-4" />
+            </button>
+
+            {/* Share */}
+            <button
+              onClick={() => setShowShare(true)}
+              title="Compartir"
+              className="p-1.5 rounded-lg text-slate-300 hover:text-slate-600 transition-colors"
+            >
+              <Share2 className="w-4 h-4" />
             </button>
 
             {/* Version history */}
@@ -656,8 +715,30 @@ export function DocEditor({ page, users = [], readOnly = false, onTitleChange, o
               </button>
               {showOptions && (
                 <>
-                  <div className="fixed inset-0 z-40" onClick={() => setShowOptions(false)} />
-                  <div className="absolute right-0 top-full mt-1 z-50 bg-white rounded-xl shadow-lg border border-slate-200 py-1 min-w-[180px]">
+                  <div className="fixed inset-0 z-[190]" onClick={() => setShowOptions(false)} />
+                  <div className="absolute right-0 top-full mt-1 z-[200] bg-white rounded-xl shadow-xl border border-slate-200 py-1 min-w-[180px]">
+                    <button
+                      onClick={handleDuplicate}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left"
+                    >
+                      <Copy className="w-4 h-4 text-slate-400" />
+                      Duplicar página
+                    </button>
+                    <button
+                      onClick={handleExportMarkdown}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left"
+                    >
+                      <Download className="w-4 h-4 text-slate-400" />
+                      Exportar a Markdown
+                    </button>
+                    <button
+                      onClick={handleExportPdf}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left"
+                    >
+                      <Download className="w-4 h-4 text-red-400" />
+                      Exportar a PDF
+                    </button>
+                    <div className="border-t border-slate-100 my-1" />
                     <button
                       onClick={handleToggleTemplate}
                       className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 text-left"
@@ -849,11 +930,39 @@ export function DocEditor({ page, users = [], readOnly = false, onTitleChange, o
               }}
             />
           )}
+
+          {/* Backlinks */}
+          {backlinks.length > 0 && (
+            <div className="mt-8 pt-4 border-t border-slate-100 print:hidden">
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <Link2 className="w-3.5 h-3.5" /> Mencionado en
+              </p>
+              <div className="space-y-1">
+                {backlinks.map(bl => (
+                  <a
+                    key={bl.id}
+                    href={`/docs/${bl.id}`}
+                    className="flex items-center gap-2 text-sm text-slate-600 hover:text-[#17394f] hover:bg-slate-50 rounded-lg px-2 py-1.5 transition-colors"
+                  >
+                    <span>{bl.icon ?? '📄'}</span>
+                    <span className="truncate">{bl.title || 'Sin título'}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         </div>
 
-        {/* Table of Contents (right panel, only when headings exist) */}
-        {!readOnly && <DocTOC blocks={blocks} />}
+        {/* Table of Contents — disabled */}
+        {/* {!readOnly && !showComments && <DocTOC blocks={blocks} />} */}
+
+        {/* Comments side panel */}
+        {showComments && (
+          <div className="w-80 shrink-0 border-l border-slate-100 bg-white flex flex-col print:hidden">
+            <CommentsPanel pageId={page.id} currentUserId={currentUserId} isAdmin={isAdmin} />
+          </div>
+        )}
       </div>
 
       {/* / Block menu */}
@@ -878,6 +987,11 @@ export function DocEditor({ page, users = [], readOnly = false, onTitleChange, o
           onClose={() => setShowVersions(false)}
           onRestore={handleRestoreVersion}
         />
+      )}
+
+      {/* Share modal */}
+      {showShare && (
+        <ShareModal pageId={page.id} pageTitle={title} onClose={() => setShowShare(false)} />
       )}
     </div>
   )

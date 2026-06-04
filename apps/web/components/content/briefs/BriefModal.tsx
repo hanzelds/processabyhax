@@ -115,6 +115,75 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
   const [previewFile, setPreviewFile] = useState<BriefFileItem | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Content pieces (calendar scheduling) state
+  type BriefPiece = NonNullable<ContentBrief['contentPieces']>[number]
+  const [pieces, setPieces] = useState<BriefPiece[]>(brief?.contentPieces ?? [])
+  const [showNewPiece, setShowNewPiece] = useState(false)
+  const [newPieceTitle, setNewPieceTitle] = useState('')
+  const [newPieceDate, setNewPieceDate]   = useState('')
+  const [newPieceTime, setNewPieceTime]   = useState('')
+  const [creatingPiece, setCreatingPiece] = useState(false)
+  // Per-piece scheduling state: { [pieceId]: { date, time, draft, loading } }
+  const [pieceSchedules, setPieceSchedules] = useState<Record<string, { date: string; time: string; draft: boolean; loading: boolean }>>(() => {
+    const init: Record<string, { date: string; time: string; draft: boolean; loading: boolean }> = {}
+    for (const p of (brief?.contentPieces ?? [])) {
+      init[p.id] = {
+        date:    p.scheduledDate ? p.scheduledDate.split('T')[0] : '',
+        time:    p.scheduledTime ?? '',
+        draft:   p.calendarDraft,
+        loading: false,
+      }
+    }
+    return init
+  })
+
+  async function handleCreatePiece() {
+    if (!briefData || !newPieceTitle.trim() || !newPieceDate) return
+    setCreatingPiece(true)
+    try {
+      const created = await api.post<BriefPiece>('/api/content/pieces', {
+        title:        newPieceTitle.trim(),
+        clientId:     briefData.clientId,
+        type:         briefData.type,
+        platforms:    briefData.platforms,
+        briefId:      briefData.id,
+        copy:         briefData.copyDraft || null,
+        hashtags:     briefData.hashtags  || null,
+        scheduledDate: newPieceDate,
+        scheduledTime: newPieceTime || null,
+        calendarDraft: true,
+      })
+      setPieces(prev => [...prev, created])
+      setPieceSchedules(prev => ({
+        ...prev,
+        [created.id]: { date: newPieceDate, time: newPieceTime, draft: true, loading: false },
+      }))
+      setNewPieceTitle('')
+      setNewPieceDate('')
+      setNewPieceTime('')
+      setShowNewPiece(false)
+    } finally { setCreatingPiece(false) }
+  }
+
+  async function handleSchedulePiece(pieceId: string) {
+    const s = pieceSchedules[pieceId]
+    if (!s || !s.date) return
+    setPieceSchedules(prev => ({ ...prev, [pieceId]: { ...prev[pieceId], loading: true } }))
+    try {
+      await api.patch(`/api/content/pieces/${pieceId}/schedule`, {
+        scheduledDate: s.date,
+        scheduledTime: s.time || null,
+        calendarDraft: s.draft,
+      })
+      setPieces(prev => prev.map(p => p.id === pieceId ? {
+        ...p, scheduledDate: s.date, scheduledTime: s.time || null, calendarDraft: s.draft,
+        status: s.draft ? 'listo' : 'programado',
+      } : p))
+    } finally {
+      setPieceSchedules(prev => ({ ...prev, [pieceId]: { ...prev[pieceId], loading: false } }))
+    }
+  }
+
   async function loadFiles() {
     if (!brief || filesLoaded) return
     const data = await api.get<BriefFileItem[]>(`/api/briefs/${brief.id}/files`)
@@ -493,7 +562,12 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
                 <div><p className={LABEL}>Tipo</p><p className="text-slate-700">{brief?.type}</p></div>
                 <div><p className={LABEL}>Plataformas</p><p className="text-slate-700">{brief?.platforms.join(', ')}</p></div>
                 {brief?.technicalNotes && <div className="col-span-2"><p className={LABEL}>Indicaciones técnicas</p><p className="text-slate-700">{brief.technicalNotes}</p></div>}
-                {brief?.clientApprovalNotes && <div className="col-span-2"><p className={LABEL}>Notas aprobación cliente</p><p className="text-slate-700">{brief.clientApprovalNotes}</p></div>}
+                {brief?.clientApprovalNotes && (
+                  <div className="col-span-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                    <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest mb-1">💬 Comentario del cliente</p>
+                    <p className="text-sm text-amber-800 leading-relaxed">"{brief.clientApprovalNotes}"</p>
+                  </div>
+                )}
                 {brief?.hashtags && <div className="col-span-2"><p className={LABEL}>Hashtags</p><p className="text-slate-700">{brief.hashtags}</p></div>}
               </div>
               {brief?.referencesUrls?.length > 0 && (
@@ -591,6 +665,162 @@ export function BriefModal({ brief, defaultStatus, clients, users, isAdmin, curr
                         </div>
                       )
                     })}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Piezas de contenido / Calendario ── */}
+              {!isNew && isAdmin && (
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  {/* Section header */}
+                  <div className="flex items-center justify-between px-3 py-2.5 bg-slate-50 border-b border-slate-200">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">📅</span>
+                      <p className="text-xs font-bold text-slate-600 uppercase tracking-wide">
+                        Publicación en calendario
+                      </p>
+                      {pieces.length > 0 && (
+                        <span className="text-[10px] font-semibold text-slate-400 bg-slate-200 px-1.5 py-0.5 rounded-full">
+                          {pieces.length}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => { setShowNewPiece(v => { if (!v) setNewPieceTitle(briefData?.title ?? ''); return !v }) }}
+                      className="flex items-center gap-1 text-[11px] font-semibold text-[#17394f] hover:text-[#17394f]/80 transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      {showNewPiece ? 'Cancelar' : 'Agregar fecha'}
+                    </button>
+                  </div>
+
+                  <div className="divide-y divide-slate-100">
+                    {/* Existing pieces */}
+                    {pieces.map(p => {
+                      const s = pieceSchedules[p.id] ?? { date: p.scheduledDate?.split('T')[0] ?? '', time: p.scheduledTime ?? '', draft: p.calendarDraft, loading: false }
+                      const hasDate = !!s.date
+                      return (
+                        <div key={p.id} className="px-3 py-2.5 bg-white space-y-2">
+                          {/* Piece info row */}
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full shrink-0 ${
+                              p.calendarDraft ? 'bg-amber-400' :
+                              p.status === 'programado' ? 'bg-purple-400' :
+                              p.status === 'publicado' ? 'bg-emerald-400' : 'bg-slate-300'
+                            }`} />
+                            <span className="text-sm font-medium text-slate-800 flex-1 truncate">{p.title}</span>
+                            {p.calendarDraft && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 shrink-0">
+                                BORRADOR CLIENTE
+                              </span>
+                            )}
+                            {!p.calendarDraft && p.status === 'programado' && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 shrink-0">
+                                PROGRAMADO
+                              </span>
+                            )}
+                          </div>
+                          {/* Date/time + draft controls */}
+                          <div className="flex gap-2 items-end">
+                            <div className="flex-1">
+                              <input
+                                type="date"
+                                value={s.date}
+                                onChange={e => setPieceSchedules(prev => ({ ...prev, [p.id]: { ...prev[p.id] ?? s, date: e.target.value } }))}
+                                className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#17394f]/20"
+                              />
+                            </div>
+                            <div className="w-24 shrink-0">
+                              <input
+                                type="time"
+                                value={s.time}
+                                onChange={e => setPieceSchedules(prev => ({ ...prev, [p.id]: { ...prev[p.id] ?? s, time: e.target.value } }))}
+                                className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-[#17394f]/20"
+                              />
+                            </div>
+                          </div>
+                          {hasDate && (
+                            <div className="flex items-center justify-between">
+                              <label className="flex items-center gap-2 cursor-pointer group">
+                                <div className="relative shrink-0">
+                                  <input
+                                    type="checkbox"
+                                    checked={s.draft}
+                                    onChange={e => setPieceSchedules(prev => ({ ...prev, [p.id]: { ...prev[p.id] ?? s, draft: e.target.checked } }))}
+                                    className="sr-only"
+                                  />
+                                  <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center transition-colors ${
+                                    s.draft ? 'bg-amber-500 border-amber-500' : 'border-slate-300 group-hover:border-amber-400'
+                                  }`}>
+                                    {s.draft && <span className="text-white text-[9px] leading-none font-bold">✓</span>}
+                                  </div>
+                                </div>
+                                <span className="text-[11px] text-slate-500">Enviar como borrador al cliente</span>
+                              </label>
+                              <button
+                                onClick={() => handleSchedulePiece(p.id)}
+                                disabled={s.loading || !s.date}
+                                className="text-[11px] font-semibold bg-[#17394f] text-white px-2.5 py-1 rounded-lg disabled:opacity-40 hover:bg-[#17394f]/90 transition-colors shrink-0"
+                              >
+                                {s.loading ? '…' : s.draft ? 'Enviar borrador' : 'Confirmar fecha'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+
+                    {pieces.length === 0 && !showNewPiece && (
+                      <div className="px-3 py-4 text-center">
+                        <p className="text-xs text-slate-400">Sin piezas vinculadas. Agrega una fecha para proponer al cliente.</p>
+                      </div>
+                    )}
+
+                    {/* Quick create form */}
+                    {showNewPiece && (
+                      <div className="px-3 py-3 bg-slate-50 space-y-2">
+                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Nueva pieza</p>
+                        <input
+                          type="text"
+                          value={newPieceTitle}
+                          onChange={e => setNewPieceTitle(e.target.value)}
+                          placeholder="Título de la pieza…"
+                          className="w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#17394f]/20"
+                        />
+                        <div className="flex gap-2">
+                          <input
+                            type="date"
+                            value={newPieceDate}
+                            onChange={e => setNewPieceDate(e.target.value)}
+                            className="flex-1 border border-slate-200 rounded-lg px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#17394f]/20"
+                          />
+                          <input
+                            type="time"
+                            value={newPieceTime}
+                            onChange={e => setNewPieceTime(e.target.value)}
+                            className="w-28 shrink-0 border border-slate-200 rounded-lg px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#17394f]/20"
+                          />
+                        </div>
+                        <p className="text-[10px] text-amber-600 bg-amber-50 rounded-lg px-2 py-1.5">
+                          📅 Se enviará al cliente como borrador de fecha para confirmación.
+                        </p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={handleCreatePiece}
+                            disabled={creatingPiece || !newPieceTitle.trim() || !newPieceDate}
+                            className="flex-1 bg-[#17394f] text-white text-xs font-semibold rounded-lg py-2 disabled:opacity-40 hover:bg-[#17394f]/90"
+                          >
+                            {creatingPiece ? 'Creando…' : 'Crear y enviar borrador'}
+                          </button>
+                          <button
+                            onClick={() => { setShowNewPiece(false); setNewPieceTitle(''); setNewPieceDate(''); setNewPieceTime('') }}
+                            className="px-3 text-xs text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

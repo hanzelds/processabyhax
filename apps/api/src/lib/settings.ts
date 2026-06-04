@@ -41,13 +41,3 @@ export async function emailEnabled(notifKey?: string): Promise<boolean> {
   return true
 }
 
-/**
- * Returns true if WhatsApp notifications should be sent for the given key.
- * Checks: global whatsapp_enabled AND the per-type toggle (if provided).
- */
-export async function whatsappEnabled(notifKey?: string): Promise<boolean> {
-  const s = await getSettings()
-  if (s.whatsapp_enabled !== 'true') return false   // off by default until configured
-  if (notifKey && s[notifKey] === 'false') return false
-  return true
-}

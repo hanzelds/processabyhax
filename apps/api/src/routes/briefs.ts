@@ -29,6 +29,13 @@ const BRIEF_SELECT = {
   },
   _count: { select: { scripts: true } },
   scripts: { select: { id: true, title: true, status: true }, orderBy: { createdAt: 'asc' as const } },
+  contentPieces: {
+    select: {
+      id: true, title: true, type: true, platforms: true, status: true,
+      scheduledDate: true, scheduledTime: true, calendarDraft: true, copyStatus: true,
+    },
+    orderBy: { createdAt: 'asc' as const },
+  },
 }
 
 async function logBriefHistory(briefId: string, actorId: string, eventType: string, description: string, meta?: object) {
@@ -296,6 +303,13 @@ briefsRouter.post('/:id/assignees', requirePermission('content.write'), async (r
     prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true, status: true } }),
   ])
   if (!brief || !user) { res.status(404).json({ error: 'Brief o usuario no encontrado' }); return }
+
+  // Prevent duplicate — unique constraint (briefId, userId, role)
+  const existing = await prisma.briefAssignee.findUnique({
+    where: { briefId_userId_role: { briefId: req.params.id, userId, role: role as BriefRole } },
+    select: { id: true },
+  })
+  if (existing) { res.status(409).json({ error: 'Este usuario ya tiene ese rol en el brief' }); return }
 
   const assignee = await prisma.briefAssignee.create({
     data: { briefId: req.params.id, userId, role: role as BriefRole, assignedById: req.user!.userId },

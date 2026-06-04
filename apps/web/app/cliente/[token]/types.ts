@@ -16,9 +16,21 @@ export type PortalPiece = {
   publicationNotes: string | null
   scheduledDate: string | null
   scheduledTime: string | null
+  calendarDraft: boolean
   briefId: string | null
   coverImageFileId: string | null
   scripts: PortalScript[]
+  // Brief fields surfaced on the piece when linked
+  concept: string | null
+  script: string | null
+  copyDraft: string | null
+  technicalNotes: string | null
+  briefFiles: PortalBriefFile[]
+  // Content approval (copy/design/concept)
+  contentApproval: PortalApproval | null
+  // Date approval (proposed publication date)
+  dateApproval: PortalApproval | null
+  // Kept for backward compat (= contentApproval)
   portalApproval: PortalApproval | null
 }
 
