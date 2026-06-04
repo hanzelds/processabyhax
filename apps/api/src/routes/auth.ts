@@ -74,7 +74,7 @@ authRouter.post('/login', async (req, res) => {
 
 // ── POST /auth/logout ─────────────────────────────────────────────────────────
 
-authRouter.post('/logout', async (req, res) => {
+authRouter.post('/logout', isAuth, async (req, res) => {
   const jti = req.user?.jti
   if (jti) {
     const tokenHash = hashToken(jti)
@@ -119,8 +119,7 @@ authRouter.post('/forgot-password', async (req, res) => {
 
   await sendPasswordResetEmail(user.email, user.name, rawToken)
 
-  const APP_URL = process.env.APP_URL || 'https://processa.hax.com.do'
-  res.json({ ok: true, resetLink: `${APP_URL}/reset-password?token=${rawToken}` })
+  res.json({ ok: true })
 })
 
 // ── POST /auth/reset-password ─────────────────────────────────────────────────

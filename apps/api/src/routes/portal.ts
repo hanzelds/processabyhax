@@ -14,7 +14,7 @@ import {
   sendClientChangesEmail,
   sendAllApprovedEmail,
 } from '../lib/email'
-import { isAuth, isAdmin } from '../middleware/auth'
+import { isAuth, isAdmin, isAdminOrLead } from '../middleware/auth'
 
 export const portalRouter = Router()
 
@@ -110,7 +110,7 @@ portalRouter.post('/admin/clients/:clientId/portal-token', isAdmin, async (req, 
 
 // ── Admin: get current token info for a client ────────────────────────────────
 
-portalRouter.get('/admin/clients/:clientId/portal-token', isAuth, async (req, res) => {
+portalRouter.get('/admin/clients/:clientId/portal-token', isAdminOrLead, async (req, res) => {
   const { clientId } = req.params
   const month = (req.query.month as string | undefined) || currentMonth()
 
@@ -142,7 +142,7 @@ portalRouter.put('/admin/clients/:clientId/monthly-objectives', isAdmin, async (
   return res.json(obj)
 })
 
-portalRouter.get('/admin/clients/:clientId/monthly-objectives', isAuth, async (req, res) => {
+portalRouter.get('/admin/clients/:clientId/monthly-objectives', isAdminOrLead, async (req, res) => {
   const { clientId } = req.params
   const month = (req.query.month as string | undefined) || currentMonth()
 

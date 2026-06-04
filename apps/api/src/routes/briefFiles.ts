@@ -104,16 +104,48 @@ briefFilesRouter.post('/', isAdminOrLead, (req, res, next) => {
 })
 
 // ── GET /briefs/:id/files/:fileId/view — inline (for portal + preview) ───────
+// Accepts: authenticated session OR valid portal token (?token=xxx)
 briefFilesRouter.get('/:fileId/view', async (req: express.Request<{ id: string; fileId: string }>, res) => {
-  // No auth required — portal needs to view files without token
+  const { verifyToken } = await import('../middleware/auth')
+
+  // Check 1: authenticated internal user
+  const cookieToken = req.cookies?.token
+  const isAuthenticated = cookieToken ? !!verifyToken(cookieToken) : false
+
+  // Check 2: valid portal token tied to this brief's client
+  let isPortalAuthorized = false
+  const portalToken = req.query.token as string | undefined
+  if (!isAuthenticated && portalToken) {
+    const tokenRow = await prisma.clientPortalToken.findUnique({
+      where: { token: portalToken },
+      select: { clientId: true, expiresAt: true },
+    })
+    if (tokenRow && new Date() < tokenRow.expiresAt) {
+      // Verify the brief belongs to this portal's client
+      const brief = await prisma.contentBrief.findUnique({
+        where: { id: req.params.id },
+        select: { clientId: true },
+      })
+      if (brief && brief.clientId === tokenRow.clientId) {
+        isPortalAuthorized = true
+      }
+    }
+  }
+
+  if (!isAuthenticated && !isPortalAuthorized) {
+    res.status(401).json({ error: 'No autorizado' }); return
+  }
+
   const file = await prisma.briefFile.findFirst({
     where: { id: req.params.fileId, briefId: req.params.id },
   })
   if (!file) { res.status(404).json({ error: 'Archivo no encontrado' }); return }
   if (!fs.existsSync(file.filePath)) { res.status(404).json({ error: 'Archivo no disponible' }); return }
 
+  // Serve SVG as attachment to prevent stored XSS
+  const disposition = file.mimeType === 'image/svg+xml' ? 'attachment' : 'inline'
   res.setHeader('Content-Type', file.mimeType)
-  res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(file.originalName)}`)
+  res.setHeader('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(file.originalName)}`)
   res.setHeader('Content-Length', file.sizeBytes)
   res.sendFile(path.resolve(file.filePath))
 })

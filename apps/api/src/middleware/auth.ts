@@ -18,14 +18,15 @@ declare global {
   }
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'processa-secret'
+const JWT_SECRET = process.env.JWT_SECRET
+if (!JWT_SECRET) throw new Error('JWT_SECRET environment variable is required')
 
 export function signToken(payload: AuthPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' })
+  return jwt.sign(payload, JWT_SECRET!, { expiresIn: '30d' })
 }
 
 export function verifyToken(token: string): AuthPayload | null {
-  try { return jwt.verify(token, JWT_SECRET) as AuthPayload } catch { return null }
+  try { return jwt.verify(token, JWT_SECRET!) as AuthPayload } catch { return null }
 }
 
 export async function isAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -36,7 +37,7 @@ export async function isAuth(req: Request, res: Response, next: NextFunction): P
   }
   let payload: AuthPayload
   try {
-    payload = jwt.verify(token, JWT_SECRET) as AuthPayload
+    payload = jwt.verify(token, JWT_SECRET!) as AuthPayload
   } catch {
     res.status(401).json({ error: 'Token inválido' })
     return

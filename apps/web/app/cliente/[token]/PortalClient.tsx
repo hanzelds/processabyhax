@@ -1,7 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, createContext, useContext } from 'react'
 import { PortalData, PortalPiece, PortalBrief, PortalBriefFile, PortalScript, PortalReelScene, PortalCarouselSlide } from './types'
+
+// Portal token context — avoids prop drilling into file/image components
+const PortalTokenContext = createContext<string>('')
+const usePortalToken = () => useContext(PortalTokenContext)
 
 const API_PATH = '/api'
 
@@ -44,8 +48,9 @@ function isPdf(m: string) { return m === 'application/pdf' }
 // ── File preview ──────────────────────────────────────────────────────────────
 
 function FileAttachment({ briefId, file }: { briefId: string; file: PortalBriefFile }) {
+  const portalToken = usePortalToken()
   const [open, setOpen] = useState(false)
-  const url = `${API_PATH}/briefs/${briefId}/files/${file.id}/view`
+  const url = `${API_PATH}/briefs/${briefId}/files/${file.id}/view?token=${portalToken}`
   const canPreview = isImg(file.mimeType) || isVid(file.mimeType) || isPdf(file.mimeType)
 
   return (
@@ -374,7 +379,7 @@ function ReviewCard({
         )}
         {files && files.length > 0 && briefId && (
           <div><p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">📎 Archivos ({files.length})</p>
-            <div className="space-y-1.5">{files.map(f => <FileAttachment key={f.id} briefId={briefId} file={f} />)}</div>
+            <div className="space-y-1.5">{files.map(f => <FileAttachment key={f.id} briefId={briefId!} file={f} />)}</div>
           </div>
         )}
         {approval === 'changes' && priorFeedback && (
@@ -500,9 +505,9 @@ const TYPE_BG: Record<string, string> = {
   video:    'bg-gradient-to-br from-blue-400 to-indigo-600',
 }
 
-function pieceImageUrl(piece: PortalPiece): string | null {
+function pieceImageUrl(piece: PortalPiece, portalToken: string): string | null {
   if (piece.briefId && piece.coverImageFileId)
-    return `${API_PATH}/briefs/${piece.briefId}/files/${piece.coverImageFileId}/view`
+    return `${API_PATH}/briefs/${piece.briefId}/files/${piece.coverImageFileId}/view?token=${portalToken}`
   return null
 }
 
@@ -513,7 +518,7 @@ function StoryCircle({ piece, onClick }: { piece: PortalPiece; onClick: () => vo
     : approval === 'changes'
     ? 'ring-2 ring-amber-400 ring-offset-2'
     : 'ring-2 ring-slate-300 ring-offset-2'
-  const imgUrl = pieceImageUrl(piece)
+  const imgUrl = pieceImageUrl(piece, usePortalToken())
   return (
     <button onClick={onClick} className="flex flex-col items-center gap-1 shrink-0 w-16">
       <div className={`w-14 h-14 rounded-full ${ring} overflow-hidden flex items-center justify-center ${!imgUrl ? TYPE_BG[piece.type] ?? 'bg-slate-400' : ''}`}>
@@ -529,7 +534,7 @@ function StoryCircle({ piece, onClick }: { piece: PortalPiece; onClick: () => vo
 
 function FeedCell({ piece, onClick }: { piece: PortalPiece; onClick: () => void }) {
   const approval = approvalOf(piece)
-  const imgUrl = pieceImageUrl(piece)
+  const imgUrl = pieceImageUrl(piece, usePortalToken())
   return (
     <button
       onClick={onClick}
@@ -798,6 +803,7 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
   const pct = total > 0 ? Math.round((nApproved / total) * 100) : 0
 
   return (
+    <PortalTokenContext.Provider value={token}>
     <div className="min-h-screen bg-slate-50" style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}>
 
       {/* ── Sticky header ── */}
@@ -1086,5 +1092,6 @@ export function PortalClient({ data: initialData, token }: { data: PortalData; t
         </p>
       </main>
     </div>
+    </PortalTokenContext.Provider>
   )
 }

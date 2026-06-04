@@ -2,6 +2,8 @@ import express from 'express'
 import cookieParser from 'cookie-parser'
 import cors from 'cors'
 import path from 'path'
+import helmet from 'helmet'
+import rateLimit from 'express-rate-limit'
 import { authRouter } from './routes/auth'
 import { usersRouter, AVATAR_UPLOAD_DIR } from './routes/users'
 import { clientsRouter } from './routes/clients'
@@ -40,6 +42,12 @@ import { getSettings } from './lib/settings'
 const app = express()
 const PORT = process.env.PORT || 4100
 
+// Security headers
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' }, // allow static file serving
+  contentSecurityPolicy: false, // API only, no HTML served
+}))
+
 app.use(cors({
   origin: process.env.NODE_ENV === 'production'
     ? ['https://processa.hax.com.do']
@@ -49,6 +57,26 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 app.use(cookieParser())
+
+// Rate limiting — auth endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 min
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos, espera 15 minutos.' },
+})
+const portalLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 min
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiadas solicitudes.' },
+})
+app.use('/api/auth/login',           authLimiter)
+app.use('/api/auth/forgot-password', authLimiter)
+app.use('/api/auth/reset-password',  authLimiter)
+app.use('/api/portal',               portalLimiter)
 
 // Static: avatars
 app.use('/api/avatars', express.static(AVATAR_UPLOAD_DIR))
