@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { prisma } from '../lib/prisma'
 import { isAuth, isAdmin } from '../middleware/auth'
+import { getOrgId } from '../lib/orgContext'
 
 export const teamspacesRouter = Router()
 
@@ -13,6 +14,7 @@ teamspacesRouter.get('/', isAuth, async (req, res) => {
 
   try {
     const allTeamspaces = await prisma.teamspace.findMany({
+      where: { organizationId: getOrgId(req) },
       orderBy: { createdAt: 'asc' },
       include: {
         members: { select: { userId: true } },
@@ -64,8 +66,8 @@ teamspacesRouter.get('/:id', isAuth, async (req, res) => {
   const { userId, role } = req.user!
   const isAdminUser = role === 'ADMIN'
   try {
-    const ts = await prisma.teamspace.findUnique({
-      where: { id: req.params.id },
+    const ts = await prisma.teamspace.findFirst({
+      where: { id: req.params.id, organizationId: getOrgId(req) },
       include: {
         members: {
           include: { user: { select: { id: true, name: true, email: true, area: true, avatarUrl: true, role: true } } },
@@ -112,6 +114,7 @@ teamspacesRouter.post('/', isAdmin, async (req, res) => {
         emoji: emoji || '🏢',
         description: description || null,
         visibility: visibility || 'OPEN',
+        organizationId: getOrgId(req),
         members: { create: { userId: req.user!.userId } }, // creator is member
       },
     })

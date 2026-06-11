@@ -6,6 +6,7 @@ import { logActivity } from '../lib/activityLogger'
 import { logProjectHistory, relativeTime } from '../lib/projectHistory'
 import { logClientHistory } from '../lib/clientHistory'
 import { getSettings } from '../lib/settings'
+import { getOrgId } from '../lib/orgContext'
 import fs from 'fs'
 import path from 'path'
 
@@ -59,7 +60,7 @@ projectsRouter.get('/', isAuth, async (req, res) => {
   // PARTNER sees all projects for their commercial partner clients
   if (user!.role === 'PARTNER') {
     const { clientId, status: statusFilter } = req.query
-    const where: Record<string, unknown> = { client: { commercialPartner: true } }
+    const where: Record<string, unknown> = { organizationId: getOrgId(req), client: { commercialPartner: true } }
     if (clientId) where.clientId = clientId as string
     if (statusFilter) where.status = statusFilter as ProjectStatus
     const projects = await prisma.project.findMany({
@@ -90,7 +91,7 @@ projectsRouter.get('/', isAuth, async (req, res) => {
     : { tasks: { some: { assignees: { some: { userId: user!.userId } } } } }
 
   const { clientId, status: statusFilter } = req.query
-  const where: Record<string, unknown> = { ...baseWhere }
+  const where: Record<string, unknown> = { ...baseWhere, organizationId: getOrgId(req) }
   if (clientId) where.clientId = clientId as string
   if (statusFilter) where.status = statusFilter as ProjectStatus
 
@@ -137,8 +138,8 @@ projectsRouter.get('/', isAuth, async (req, res) => {
 
 projectsRouter.get('/:id', isAuth, async (req, res) => {
   const { user } = req
-  const project = await prisma.project.findUnique({
-    where: { id: req.params.id },
+  const project = await prisma.project.findFirst({
+    where: { id: req.params.id, organizationId: getOrgId(req) },
     include: {
       client: true,
       clientService: { select: { id: true, name: true, service: { select: { id: true, name: true, icon: true, color: true } } } },
@@ -240,7 +241,7 @@ projectsRouter.post('/', isAuth, async (req, res) => {
   }
   const client = await prisma.client.findUnique({ where: { id: clientId }, select: { name: true } })
   const project = await prisma.project.create({
-    data: { name, clientId, description, startDate: new Date(startDate), estimatedClose: estimatedClose ? new Date(estimatedClose) : undefined, clientServiceId: resolvedClientServiceId },
+    data: { name, clientId, description, startDate: new Date(startDate), estimatedClose: estimatedClose ? new Date(estimatedClose) : undefined, clientServiceId: resolvedClientServiceId, organizationId: getOrgId(req) },
     include: {
       client: { select: { id: true, name: true } },
       clientService: { select: { id: true, name: true, service: { select: { id: true, name: true, icon: true, color: true } } } },
@@ -258,7 +259,7 @@ projectsRouter.post('/', isAuth, async (req, res) => {
 
 projectsRouter.patch('/:id', isAdmin, async (req, res) => {
   const { name, description, status, estimatedClose, clientServiceId } = req.body
-  const prev = await prisma.project.findUnique({ where: { id: req.params.id } })
+  const prev = await prisma.project.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) } })
   if (!prev) { res.status(404).json({ error: 'Proyecto no encontrado' }); return }
   const data: Record<string, unknown> = {}
   if (name) data.name = name
@@ -407,7 +408,7 @@ projectsRouter.get('/:id/history', isAuth, async (req, res) => {
 // ── PATCH /projects/:id/unlock ────────────────────────────────────────────────
 
 projectsRouter.patch('/:id/unlock', isAdmin, async (req, res) => {
-  const prev = await prisma.project.findUnique({ where: { id: req.params.id } })
+  const prev = await prisma.project.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) } })
   if (!prev) { res.status(404).json({ error: 'Proyecto no encontrado' }); return }
   if (prev.status !== 'COMPLETED') { res.status(400).json({ error: 'El proyecto no está completado' }); return }
 
@@ -430,8 +431,8 @@ projectsRouter.patch('/:id/unlock', isAdmin, async (req, res) => {
 // ── DELETE /projects/:id ──────────────────────────────────────────────────────
 
 projectsRouter.delete('/:id', isAdmin, async (req, res) => {
-  const project = await prisma.project.findUnique({
-    where: { id: req.params.id },
+  const project = await prisma.project.findFirst({
+    where: { id: req.params.id, organizationId: getOrgId(req) },
     select: { id: true, name: true, clientId: true },
   })
   if (!project) { res.status(404).json({ error: 'Proyecto no encontrado' }); return }

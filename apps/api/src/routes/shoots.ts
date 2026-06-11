@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
 import { isAuth, isAdminOrLead, isAdmin } from '../middleware/auth'
 import { createNotifications } from '../lib/notify'
+import { getOrgId } from '../lib/orgContext'
 
 export const shootsRouter = Router()
 shootsRouter.use(isAuth)
@@ -49,6 +50,7 @@ shootsRouter.get('/', async (req: Request, res: Response) => {
   const { status, from, to, projectId, clientId, briefId } = req.query as Record<string, string>
   const where: Record<string, unknown> = {}
 
+  where.organizationId = getOrgId(req)
   // TEAM users only see shoots where they are in crew
   if (user.role === 'TEAM') {
     where.crew = { some: { userId: user.userId } }
@@ -78,7 +80,7 @@ shootsRouter.get('/', async (req: Request, res: Response) => {
 // GET /api/shoots/:id
 shootsRouter.get('/:id', async (req: Request, res: Response) => {
   const user = req.user!
-  const shoot = await prisma.shoot.findUnique({ where: { id: req.params.id }, select: SHOOT_DETAIL_SELECT })
+  const shoot = await prisma.shoot.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) }, select: SHOOT_DETAIL_SELECT })
   if (!shoot) return res.status(404).json({ error: 'Not found' })
   // TEAM can only see shoots where they are crew
   if (user.role === 'TEAM') {
@@ -95,15 +97,16 @@ shootsRouter.post('/', isAdminOrLead, async (req: Request, res: Response) => {
   const shoot = await prisma.shoot.create({
     data: {
       title,
-      shootDate:  new Date(shootDate),
-      endDate:    endDate    ? new Date(endDate) : null,
-      locationId: locationId || null,
-      projectId:  projectId  || null,
-      clientId:   clientId   || null,
-      briefId:    briefId    || null,
-      notes:      notes      || null,
-      status:     status     || 'DRAFT',
-      createdById: req.user!.userId,
+      shootDate:      new Date(shootDate),
+      endDate:        endDate    ? new Date(endDate) : null,
+      locationId:     locationId || null,
+      projectId:      projectId  || null,
+      clientId:       clientId   || null,
+      briefId:        briefId    || null,
+      notes:          notes      || null,
+      status:         status     || 'DRAFT',
+      createdById:    req.user!.userId,
+      organizationId: getOrgId(req),
     },
     select: SHOOT_DETAIL_SELECT,
   })
@@ -112,7 +115,7 @@ shootsRouter.post('/', isAdminOrLead, async (req: Request, res: Response) => {
 
 // PATCH /api/shoots/:id
 shootsRouter.patch('/:id', isAdminOrLead, async (req: Request, res: Response) => {
-  const existing = await prisma.shoot.findUnique({ where: { id: req.params.id }, select: { id: true } })
+  const existing = await prisma.shoot.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) }, select: { id: true } })
   if (!existing) return res.status(404).json({ error: 'Not found' })
   const { title, shootDate, endDate, locationId, projectId, clientId, briefId, notes, status } = req.body
   const data: Record<string, unknown> = {}
@@ -131,7 +134,7 @@ shootsRouter.patch('/:id', isAdminOrLead, async (req: Request, res: Response) =>
 
 // DELETE /api/shoots/:id
 shootsRouter.delete('/:id', isAdmin, async (req: Request, res: Response) => {
-  const existing = await prisma.shoot.findUnique({ where: { id: req.params.id }, select: { id: true } })
+  const existing = await prisma.shoot.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) }, select: { id: true } })
   if (!existing) return res.status(404).json({ error: 'Not found' })
   await prisma.shoot.delete({ where: { id: req.params.id } })
   res.json({ ok: true })

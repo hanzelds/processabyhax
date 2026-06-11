@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
 import { isAuth, isAdminOrLead, isAdmin } from '../middleware/auth'
+import { getOrgId } from '../lib/orgContext'
 
 export const gearRouter = Router()
 gearRouter.use(isAuth)
@@ -17,13 +18,14 @@ gearRouter.get('/', async (req: Request, res: Response) => {
   const where: Record<string, unknown> = {}
   if (category) where.category = category
   if (status)   where.status   = status
+  where.organizationId = getOrgId(req)
   const items = await prisma.gearItem.findMany({ where, select: GEAR_SELECT, orderBy: [{ category: 'asc' }, { name: 'asc' }] })
   res.json(items)
 })
 
 // GET /api/gear/:id
 gearRouter.get('/:id', async (req: Request, res: Response) => {
-  const item = await prisma.gearItem.findUnique({ where: { id: req.params.id }, select: GEAR_SELECT })
+  const item = await prisma.gearItem.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) }, select: GEAR_SELECT })
   if (!item) return res.status(404).json({ error: 'Not found' })
   res.json(item)
 })
@@ -33,7 +35,7 @@ gearRouter.post('/', isAdminOrLead, async (req: Request, res: Response) => {
   const { name, category, brand, model, serialNumber, status, notes, imageUrl } = req.body
   if (!name || !category) return res.status(400).json({ error: 'name y category son requeridos' })
   const item = await prisma.gearItem.create({
-    data: { name, category, brand: brand || null, model: model || null, serialNumber: serialNumber || null, status: status || 'AVAILABLE', notes: notes || null, imageUrl: imageUrl || null },
+    data: { name, category, brand: brand || null, model: model || null, serialNumber: serialNumber || null, status: status || 'AVAILABLE', notes: notes || null, imageUrl: imageUrl || null, organizationId: getOrgId(req) },
     select: GEAR_SELECT,
   })
   res.status(201).json(item)
@@ -41,7 +43,7 @@ gearRouter.post('/', isAdminOrLead, async (req: Request, res: Response) => {
 
 // PATCH /api/gear/:id
 gearRouter.patch('/:id', isAdminOrLead, async (req: Request, res: Response) => {
-  const existing = await prisma.gearItem.findUnique({ where: { id: req.params.id }, select: { id: true } })
+  const existing = await prisma.gearItem.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) }, select: { id: true } })
   if (!existing) return res.status(404).json({ error: 'Not found' })
   const { name, category, brand, model, serialNumber, status, notes, imageUrl } = req.body
   const data: Record<string, unknown> = {}
@@ -59,6 +61,8 @@ gearRouter.patch('/:id', isAdminOrLead, async (req: Request, res: Response) => {
 
 // DELETE /api/gear/:id
 gearRouter.delete('/:id', isAdmin, async (req: Request, res: Response) => {
+  const existing = await prisma.gearItem.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) }, select: { id: true } })
+  if (!existing) return res.status(404).json({ error: 'Not found' })
   const active = await prisma.shootGear.findFirst({ where: { gearItemId: req.params.id, shoot: { status: { in: ['DRAFT', 'CONFIRMED', 'IN_PROGRESS'] } } } })
   if (active) return res.status(409).json({ error: 'Este equipo está asignado a rodajes activos' })
   await prisma.gearItem.delete({ where: { id: req.params.id } })

@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { prisma } from '../lib/prisma'
 import { isAdmin } from '../middleware/auth'
 import { AdminTaskStatus, AdminTaskCategory, AdminTaskPriority, RecurrenceFrequency } from '@prisma/client'
+import { getOrgId } from '../lib/orgContext'
 
 export const adminTasksRouter = Router()
 
@@ -51,19 +52,19 @@ function enrichTask(task: any) {
 
 // ── GET /admin/tasks/alerts ───────────────────────────────────────────────────
 
-adminTasksRouter.get('/alerts', async (_req, res) => {
+adminTasksRouter.get('/alerts', async (req, res) => {
   const today = new Date(); today.setHours(0, 0, 0, 0)
   const threeDaysLater = new Date(today); threeDaysLater.setDate(today.getDate() + 4)
 
   const [overdue, dueSoon, blocked] = await Promise.all([
     prisma.adminTask.count({
-      where: { status: { notIn: ['COMPLETADA', 'CANCELADA'] }, dueDate: { lt: today } },
+      where: { organizationId: getOrgId(req), status: { notIn: ['COMPLETADA', 'CANCELADA'] }, dueDate: { lt: today } },
     }),
     prisma.adminTask.count({
-      where: { status: { notIn: ['COMPLETADA', 'CANCELADA'] }, dueDate: { gte: today, lt: threeDaysLater } },
+      where: { organizationId: getOrgId(req), status: { notIn: ['COMPLETADA', 'CANCELADA'] }, dueDate: { gte: today, lt: threeDaysLater } },
     }),
     prisma.adminTask.count({
-      where: { status: 'BLOQUEADA' },
+      where: { organizationId: getOrgId(req), status: 'BLOQUEADA' },
     }),
   ])
 
@@ -72,8 +73,9 @@ adminTasksRouter.get('/alerts', async (_req, res) => {
 
 // ── GET /admin/tasks/recurrences ──────────────────────────────────────────────
 
-adminTasksRouter.get('/recurrences', async (_req, res) => {
+adminTasksRouter.get('/recurrences', async (req, res) => {
   const recurrences = await prisma.adminTaskRecurrence.findMany({
+    where: { organizationId: getOrgId(req) },
     orderBy: { createdAt: 'desc' },
     include: {
       _count: { select: { tasks: true } },
@@ -105,6 +107,7 @@ adminTasksRouter.post('/recurrences', async (req, res) => {
       advanceDays: advanceDays ?? 0,
       nextGenerationAt,
       createdById: req.user!.userId,
+      organizationId: getOrgId(req),
     },
   })
   res.status(201).json(recurrence)
@@ -114,7 +117,7 @@ adminTasksRouter.post('/recurrences', async (req, res) => {
 
 adminTasksRouter.patch('/recurrences/:id', async (req, res) => {
   const { title, description, category, priority, frequency, dayOfMonth, monthOfYear, dayOfWeek, advanceDays } = req.body
-  const existing = await prisma.adminTaskRecurrence.findUnique({ where: { id: req.params.id } })
+  const existing = await prisma.adminTaskRecurrence.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) } })
   if (!existing) { res.status(404).json({ error: 'Recurrencia no encontrada' }); return }
 
   const data: Record<string, unknown> = {}
@@ -138,7 +141,7 @@ adminTasksRouter.patch('/recurrences/:id', async (req, res) => {
 // ── PATCH /admin/tasks/recurrences/:id/toggle ─────────────────────────────────
 
 adminTasksRouter.patch('/recurrences/:id/toggle', async (req, res) => {
-  const existing = await prisma.adminTaskRecurrence.findUnique({ where: { id: req.params.id } })
+  const existing = await prisma.adminTaskRecurrence.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) } })
   if (!existing) { res.status(404).json({ error: 'Recurrencia no encontrada' }); return }
   const updated = await prisma.adminTaskRecurrence.update({
     where: { id: req.params.id },
@@ -150,7 +153,7 @@ adminTasksRouter.patch('/recurrences/:id/toggle', async (req, res) => {
 // ── DELETE /admin/tasks/recurrences/:id ───────────────────────────────────────
 
 adminTasksRouter.delete('/recurrences/:id', async (req, res) => {
-  const existing = await prisma.adminTaskRecurrence.findUnique({ where: { id: req.params.id } })
+  const existing = await prisma.adminTaskRecurrence.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) } })
   if (!existing) { res.status(404).json({ error: 'Recurrencia no encontrada' }); return }
   // Detach tasks from recurrence before deleting
   await prisma.adminTask.updateMany({ where: { recurrenceId: req.params.id }, data: { recurrenceId: null } })
@@ -163,7 +166,7 @@ adminTasksRouter.delete('/recurrences/:id', async (req, res) => {
 adminTasksRouter.get('/', async (req, res) => {
   const { category, priority, status, tab } = req.query
 
-  const where: Record<string, unknown> = {}
+  const where: Record<string, unknown> = { organizationId: getOrgId(req) }
 
   if (tab === 'pending') {
     where.status = { in: ['PENDIENTE', 'BLOQUEADA'] }
@@ -194,8 +197,8 @@ adminTasksRouter.get('/', async (req, res) => {
 // ── GET /admin/tasks/:id ──────────────────────────────────────────────────────
 
 adminTasksRouter.get('/:id', async (req, res) => {
-  const task = await prisma.adminTask.findUnique({
-    where: { id: req.params.id },
+  const task = await prisma.adminTask.findFirst({
+    where: { id: req.params.id, organizationId: getOrgId(req) },
     include: { recurrence: true },
   })
   if (!task) { res.status(404).json({ error: 'Tarea no encontrada' }); return }
@@ -231,6 +234,7 @@ adminTasksRouter.post('/', async (req, res) => {
       dueDate: dueDate ? new Date(dueDate) : null,
       recurrenceId: recurrenceId || null,
       createdById: req.user!.userId,
+      organizationId: getOrgId(req),
     },
     include: { recurrence: { select: { id: true, frequency: true } } },
   })
@@ -242,7 +246,7 @@ adminTasksRouter.post('/', async (req, res) => {
 // ── PATCH /admin/tasks/:id ────────────────────────────────────────────────────
 
 adminTasksRouter.patch('/:id', async (req, res) => {
-  const prev = await prisma.adminTask.findUnique({ where: { id: req.params.id } })
+  const prev = await prisma.adminTask.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) } })
   if (!prev) { res.status(404).json({ error: 'Tarea no encontrada' }); return }
   if (prev.status === 'COMPLETADA' || prev.status === 'CANCELADA') {
     res.status(400).json({ error: 'Tarea cerrada: solo lectura' }); return
@@ -279,7 +283,7 @@ adminTasksRouter.patch('/:id/status', async (req, res) => {
   const { status } = req.body
   if (!status) { res.status(400).json({ error: 'status requerido' }); return }
 
-  const prev = await prisma.adminTask.findUnique({ where: { id: req.params.id } })
+  const prev = await prisma.adminTask.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) } })
   if (!prev) { res.status(404).json({ error: 'Tarea no encontrada' }); return }
   if (prev.status === 'COMPLETADA' || prev.status === 'CANCELADA') {
     res.status(400).json({ error: 'Tarea cerrada: solo lectura' }); return
@@ -298,7 +302,7 @@ adminTasksRouter.patch('/:id/status', async (req, res) => {
 
 adminTasksRouter.patch('/:id/complete', async (req, res) => {
   const { resolutionNotes } = req.body
-  const prev = await prisma.adminTask.findUnique({ where: { id: req.params.id } })
+  const prev = await prisma.adminTask.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) } })
   if (!prev) { res.status(404).json({ error: 'Tarea no encontrada' }); return }
   if (prev.status === 'COMPLETADA' || prev.status === 'CANCELADA') {
     res.status(400).json({ error: 'Tarea ya cerrada' }); return
@@ -335,6 +339,7 @@ adminTasksRouter.patch('/:id/complete', async (req, res) => {
             dueDate: nextDue,
             recurrenceId: recurrence.id,
             createdById: req.user!.userId,
+            organizationId: getOrgId(req),
           },
         })
         await prisma.adminTaskRecurrence.update({

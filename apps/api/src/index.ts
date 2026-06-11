@@ -38,6 +38,8 @@ import { metaRouter } from './routes/meta'
 import { credentialsRouter } from './routes/credentials'
 import { sendTaskReminders } from './lib/taskRemindersJob'
 import { getSettings } from './lib/settings'
+import billingRouter from './routes/billing'
+import { superAdminRouter } from './routes/superAdmin'
 
 const app = express()
 const PORT = process.env.PORT || 4100
@@ -47,6 +49,9 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }, // allow static file serving
   contentSecurityPolicy: false, // API only, no HTML served
 }))
+
+// Stripe webhook needs raw body — applied only to this path, before global express.json()
+app.use('/api/billing/webhook', express.raw({ type: 'application/json' }))
 
 app.use(cors({
   origin: process.env.NODE_ENV === 'production'
@@ -129,6 +134,8 @@ app.use('/api/services',      servicesRouter)
 app.use('/api/clients',       clientServicesRouter)
 app.use('/api/meta',          metaRouter)
 app.use('/api/credentials',   credentialsRouter)
+app.use('/api/billing',       billingRouter)
+app.use('/api/super-admin',   superAdminRouter)
 
 app.all('*', (_, res) => res.status(404).json({ error: 'Not found' }))
 

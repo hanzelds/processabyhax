@@ -6,6 +6,7 @@ import { createNotification } from '../lib/notify'
 import multer from 'multer'
 import pdfParse from 'pdf-parse'
 import puppeteer from 'puppeteer'
+import { getOrgId } from '../lib/orgContext'
 
 export const docsRouter = Router()
 
@@ -59,7 +60,7 @@ docsRouter.get('/search', isAuth, async (req, res) => {
   const { q, contextType, contextId } = req.query as Record<string, string>
   if (!q || q.trim().length < 2) { res.json([]); return }
   try {
-    const where: Record<string, unknown> = { isTemplate: false }
+    const where: Record<string, unknown> = { isTemplate: false, organizationId: getOrgId(req) }
     if (contextType) where.contextType = contextType
     if (contextId)   where.contextId   = contextId
 
@@ -145,7 +146,7 @@ docsRouter.get('/templates/:contextType', isAuth, async (req, res) => {
   const { contextType } = req.params
   try {
     const templates = await prisma.docPage.findMany({
-      where: { contextType, isTemplate: true },
+      where: { contextType, isTemplate: true, organizationId: getOrgId(req) },
       select: {
         id: true, title: true, icon: true, templateName: true, templateDesc: true,
         contextType: true, contextId: true, createdAt: true,
@@ -164,15 +165,16 @@ docsRouter.get('/templates/:contextType', isAuth, async (req, res) => {
 docsRouter.get('/home/:contextType/:contextId', isAuth, async (req, res) => {
   const { contextType, contextId } = req.params
   try {
+    const orgId = getOrgId(req)
     const [total, byStatus, recentPages, recentVersions] = await Promise.all([
-      prisma.docPage.count({ where: { contextType, contextId, isTemplate: false } }),
+      prisma.docPage.count({ where: { contextType, contextId, isTemplate: false, organizationId: orgId } }),
       prisma.docPage.groupBy({
         by: ['pageStatus'],
-        where: { contextType, contextId, isTemplate: false },
+        where: { contextType, contextId, isTemplate: false, organizationId: orgId },
         _count: true,
       }),
       prisma.docPage.findMany({
-        where: { contextType, contextId, isTemplate: false },
+        where: { contextType, contextId, isTemplate: false, organizationId: orgId },
         orderBy: { updatedAt: 'desc' },
         take: 5,
         select: {
@@ -205,8 +207,8 @@ docsRouter.get('/home/:contextType/:contextId', isAuth, async (req, res) => {
 
 docsRouter.get('/pages/:id', isAuth, async (req, res) => {
   try {
-    const page = await prisma.docPage.findUnique({
-      where: { id: req.params.id },
+    const page = await prisma.docPage.findFirst({
+      where: { id: req.params.id, organizationId: getOrgId(req) },
       select: { ...PAGE_SELECT, content: true },
     })
     if (!page) { res.status(404).json({ error: 'Página no encontrada' }); return }
@@ -228,7 +230,7 @@ docsRouter.get('/pages/:id', isAuth, async (req, res) => {
 docsRouter.get('/pages/:id/children', isAuth, async (req, res) => {
   try {
     const children = await prisma.docPage.findMany({
-      where: { parentId: req.params.id },
+      where: { parentId: req.params.id, organizationId: getOrgId(req) },
       select: {
         id: true, title: true, icon: true, parentId: true,
         sortOrder: true, isPublished: true, pageStatus: true, isTemplate: true,
@@ -330,6 +332,7 @@ docsRouter.post('/pages/:id/children', isAuth, async (req, res) => {
         sortOrder,
         content: [{ id: uuidv4(), type: 'paragraph', content: { html: '' } }],
         createdById: req.user!.userId,
+        organizationId: getOrgId(req),
       },
       select: { ...PAGE_SELECT, content: true },
     })
@@ -571,6 +574,7 @@ docsRouter.post('/templates/apply', isAuth, async (req, res) => {
         sortOrder,
         content: template.content as object[],
         createdById: req.user!.userId,
+        organizationId: getOrgId(req),
       },
       select: { ...PAGE_SELECT, content: true },
     })
@@ -644,7 +648,7 @@ docsRouter.get('/:contextType/:contextId', isAuth, async (req, res) => {
   }
   try {
     const pages = await prisma.docPage.findMany({
-      where: { contextType, contextId },
+      where: { contextType, contextId, organizationId: getOrgId(req) },
       select: {
         id: true, title: true, icon: true, parentId: true,
         sortOrder: true, isPublished: true, pageStatus: true, isTemplate: true,
@@ -935,6 +939,7 @@ docsRouter.post('/import', isAuth, async (req, res) => {
             sortOrder:   nextRootSort++,
             content:     content as object[],
             createdById: userId,
+            organizationId: getOrgId(req),
           },
           select: { id: true },
         })
@@ -972,6 +977,7 @@ docsRouter.post('/import', isAuth, async (req, res) => {
             sortOrder:   childSort,
             content:     content as object[],
             createdById: userId,
+            organizationId: getOrgId(req),
           },
           select: { id: true },
         })
@@ -1038,6 +1044,7 @@ docsRouter.post('/import-pdf', isAuth, pdfUpload.single('file'), async (req, res
         contextId,
         sortOrder:   (maxSort._max.sortOrder ?? -1) + 1,
         createdById: req.user!.userId,
+        organizationId: getOrgId(req),
       },
       select: { id: true, title: true },
     })
@@ -1078,6 +1085,7 @@ docsRouter.post('/:contextType/:contextId', isAuth, async (req, res) => {
         sortOrder,
         content: [{ id: uuidv4(), type: 'paragraph', content: { html: '' } }],
         createdById: req.user!.userId,
+        organizationId: getOrgId(req),
       },
       select: { ...PAGE_SELECT, content: true },
     })

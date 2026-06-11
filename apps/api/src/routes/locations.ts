@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
 import { isAuth, isAdminOrLead, isAdmin } from '../middleware/auth'
+import { getOrgId } from '../lib/orgContext'
 
 export const locationsRouter = Router()
 locationsRouter.use(isAuth)
@@ -18,14 +19,15 @@ locationsRouter.get('/', async (req: Request, res: Response) => {
   const where: Record<string, unknown> = {}
   if (active === 'true')  where.isActive = true
   if (active === 'false') where.isActive = false
+  where.organizationId = getOrgId(req)
   const items = await prisma.location.findMany({ where, select: LOCATION_SELECT, orderBy: { name: 'asc' } })
   res.json(items)
 })
 
 // GET /api/locations/:id
 locationsRouter.get('/:id', async (req: Request, res: Response) => {
-  const item = await prisma.location.findUnique({
-    where: { id: req.params.id },
+  const item = await prisma.location.findFirst({
+    where: { id: req.params.id, organizationId: getOrgId(req) },
     select: {
       ...LOCATION_SELECT,
       shoots: {
@@ -46,13 +48,14 @@ locationsRouter.post('/', isAdminOrLead, async (req: Request, res: Response) => 
   const item = await prisma.location.create({
     data: {
       name,
-      address:      address      || null,
-      contactName:  contactName  || null,
-      contactPhone: contactPhone || null,
-      contactEmail: contactEmail || null,
-      costPerDay:   costPerDay   != null ? Number(costPerDay) : null,
-      notes:        notes        || null,
-      photoUrls:    Array.isArray(photoUrls) ? photoUrls.filter(Boolean) : [],
+      address:        address      || null,
+      contactName:    contactName  || null,
+      contactPhone:   contactPhone || null,
+      contactEmail:   contactEmail || null,
+      costPerDay:     costPerDay   != null ? Number(costPerDay) : null,
+      notes:          notes        || null,
+      photoUrls:      Array.isArray(photoUrls) ? photoUrls.filter(Boolean) : [],
+      organizationId: getOrgId(req),
     },
     select: LOCATION_SELECT,
   })
@@ -61,7 +64,7 @@ locationsRouter.post('/', isAdminOrLead, async (req: Request, res: Response) => 
 
 // PATCH /api/locations/:id
 locationsRouter.patch('/:id', isAdminOrLead, async (req: Request, res: Response) => {
-  const existing = await prisma.location.findUnique({ where: { id: req.params.id }, select: { id: true } })
+  const existing = await prisma.location.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) }, select: { id: true } })
   if (!existing) return res.status(404).json({ error: 'Not found' })
   const { name, address, contactName, contactPhone, contactEmail, costPerDay, notes, photoUrls } = req.body
   const data: Record<string, unknown> = {}
@@ -79,7 +82,7 @@ locationsRouter.patch('/:id', isAdminOrLead, async (req: Request, res: Response)
 
 // DELETE /api/locations/:id — soft delete
 locationsRouter.delete('/:id', isAdmin, async (req: Request, res: Response) => {
-  const existing = await prisma.location.findUnique({ where: { id: req.params.id }, select: { id: true } })
+  const existing = await prisma.location.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) }, select: { id: true } })
   if (!existing) return res.status(404).json({ error: 'Not found' })
   const item = await prisma.location.update({ where: { id: req.params.id }, data: { isActive: false }, select: LOCATION_SELECT })
   res.json(item)

@@ -8,6 +8,8 @@ export interface AuthPayload {
   role: 'ADMIN' | 'LEAD' | 'TEAM' | 'PARTNER'
   name?: string
   jti?: string
+  organizationId?: string
+  orgPlan?: string
 }
 
 declare global {

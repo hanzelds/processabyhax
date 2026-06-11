@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import { prisma } from '../lib/prisma'
 import { isAuth, isAdmin } from '../middleware/auth'
+import { getOrgId } from '../lib/orgContext'
 
 const router = Router()
 
@@ -19,6 +20,7 @@ router.get('/', isAuth, async (req: Request, res: Response) => {
     const { clientId, briefId, status } = req.query
 
     const where: any = {}
+    where.organizationId = getOrgId(req)
     if (clientId) where.clientId = clientId as string
     if (briefId)  where.briefId  = briefId  as string
     if (status)   where.status   = status   as string
@@ -44,6 +46,7 @@ router.get('/mine', isAuth, async (req: Request, res: Response) => {
     const { userId } = req.user!
     const scripts = await prisma.script.findMany({
       where: {
+        organizationId: getOrgId(req),
         brief: { assignees: { some: { userId } } },
         status: { not: 'archivado' },
       },
@@ -60,8 +63,8 @@ router.get('/mine', isAuth, async (req: Request, res: Response) => {
 // GET /api/scripts/:id
 router.get('/:id', isAuth, async (req: Request, res: Response) => {
   try {
-    const script = await prisma.script.findUnique({
-      where: { id: req.params.id },
+    const script = await prisma.script.findFirst({
+      where: { id: req.params.id, organizationId: getOrgId(req) },
       include: {
         ...SCRIPT_INCLUDE,
         versions: {
@@ -104,14 +107,15 @@ router.post('/', isAuth, async (req: Request, res: Response) => {
 
     const script = await prisma.script.create({
       data: {
-        brief:     { connect: { id: briefId } },
-        client:    { connect: { id: brief.clientId } },
+        brief:          { connect: { id: briefId } },
+        client:         { connect: { id: brief.clientId } },
         title,
-        type:      brief.type,
-        status:    'borrador',
-        content:   [],
-        createdBy: { connect: { id: userId } },
-        updatedBy: { connect: { id: userId } },
+        type:           brief.type,
+        status:         'borrador',
+        content:        [],
+        createdBy:      { connect: { id: userId } },
+        updatedBy:      { connect: { id: userId } },
+        organizationId: getOrgId(req),
       },
       include: SCRIPT_INCLUDE,
     })
@@ -128,7 +132,7 @@ router.patch('/:id', isAuth, async (req: Request, res: Response) => {
     const { userId } = req.user!
     const { title, content, notes, status } = req.body
 
-    const existing = await prisma.script.findUnique({ where: { id: req.params.id } })
+    const existing = await prisma.script.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) } })
     if (!existing) return res.status(404).json({ error: 'Not found' })
 
     const data: any = { updatedBy: { connect: { id: userId } } }
@@ -270,6 +274,8 @@ router.patch('/:id/comments/:commentId/resolve', isAuth, async (req: Request, re
 // DELETE /api/scripts/:id — admin only
 router.delete('/:id', isAdmin, async (req: Request, res: Response) => {
   try {
+    const existing = await prisma.script.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) }, select: { id: true } })
+    if (!existing) return res.status(404).json({ error: 'Not found' })
     await prisma.script.delete({ where: { id: req.params.id } })
     res.json({ ok: true })
   } catch (e) {

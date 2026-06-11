@@ -4,6 +4,7 @@ import { isAuth, isAdminOrLead, requirePermission } from '../middleware/auth'
 import { BriefStatus, BriefRole, ContentType } from '@prisma/client'
 import { sendBriefAssignedEmail, sendBriefStatusEmail } from '../lib/email'
 import { createNotification, createNotifications } from '../lib/notify'
+import { getOrgId } from '../lib/orgContext'
 
 export const briefsRouter = Router()
 
@@ -55,7 +56,7 @@ briefsRouter.get('/', isAuth, async (req, res) => {
   const { clientId, type, status, search, limit } = req.query
   const { user } = req
 
-  const where: Record<string, unknown> = {}
+  const where: Record<string, unknown> = { organizationId: getOrgId(req) }
   if (clientId) where.clientId = clientId as string
   if (type)     where.type     = type as ContentType
   if (status)   where.status   = status as BriefStatus
@@ -77,8 +78,8 @@ briefsRouter.get('/', isAuth, async (req, res) => {
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
 briefsRouter.get('/:id', isAuth, async (req, res) => {
-  const brief = await prisma.contentBrief.findUnique({
-    where: { id: req.params.id },
+  const brief = await prisma.contentBrief.findFirst({
+    where: { id: req.params.id, organizationId: getOrgId(req) },
     select: { ...BRIEF_SELECT, history: { include: { actor: { select: { id: true, name: true } } }, orderBy: { createdAt: 'desc' } } },
   })
   if (!brief) { res.status(404).json({ error: 'Brief no encontrado' }); return }
@@ -112,6 +113,7 @@ briefsRouter.post('/bulk', requirePermission('content.write'), async (req, res) 
           isRecurring: false,
           referencesUrls: [],
           createdById: req.user!.userId,
+          organizationId: getOrgId(req),
         },
         select: BRIEF_SELECT,
       })
@@ -146,6 +148,7 @@ briefsRouter.post('/', requirePermission('content.write'), async (req, res) => {
       isRecurring: isRecurring ?? false,
       recurrenceFreq: recurrenceFreq || null,
       createdById: req.user!.userId,
+      organizationId: getOrgId(req),
     },
     select: BRIEF_SELECT,
   })

@@ -4,6 +4,7 @@ import { isAuth, isAdmin, isAdminOrLead, requirePermission } from '../middleware
 import { ClientStatus, ClientTier } from '@prisma/client'
 import { logActivity } from '../lib/activityLogger'
 import { logClientHistory, relativeTime } from '../lib/clientHistory'
+import { getOrgId } from '../lib/orgContext'
 
 export const clientsRouter = Router()
 
@@ -23,7 +24,7 @@ async function clientMetricsInline(clientId: string) {
 clientsRouter.get('/', requirePermission('clients.read'), async (req, res) => {
   const isPartner = req.user!.role === 'PARTNER'
   const clients = await prisma.client.findMany({
-    where: isPartner ? { commercialPartner: true } : undefined,
+    where: isPartner ? { organizationId: getOrgId(req), commercialPartner: true } : { organizationId: getOrgId(req) },
     orderBy: [{ tier: 'asc' }, { name: 'asc' }],
     include: {
       _count: { select: { projects: true } },
@@ -49,8 +50,8 @@ clientsRouter.get('/', requirePermission('clients.read'), async (req, res) => {
 // ── GET /clients/:id ──────────────────────────────────────────────────────────
 
 clientsRouter.get('/:id', requirePermission('clients.read'), async (req, res) => {
-  const client = await prisma.client.findUnique({
-    where: { id: req.params.id },
+  const client = await prisma.client.findFirst({
+    where: { id: req.params.id, organizationId: getOrgId(req) },
     include: {
       projects: { orderBy: { createdAt: 'desc' }, include: { _count: { select: { tasks: true } } } },
       contacts: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
@@ -68,7 +69,7 @@ clientsRouter.get('/:id', requirePermission('clients.read'), async (req, res) =>
 
 clientsRouter.get('/:id/metrics', requirePermission('clients.read'), async (req, res) => {
   if (req.user!.role === 'PARTNER') {
-    const c = await prisma.client.findUnique({ where: { id: req.params.id }, select: { commercialPartner: true } })
+    const c = await prisma.client.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) }, select: { commercialPartner: true } })
     if (!c?.commercialPartner) { res.status(403).json({ error: 'Acceso denegado' }); return }
   }
   const today = new Date(); today.setHours(0, 0, 0, 0)
@@ -115,7 +116,7 @@ clientsRouter.get('/:id/metrics', requirePermission('clients.read'), async (req,
   const byStatus: Record<string, number> = {}
   projects.forEach(p => { byStatus[p.status] = (byStatus[p.status] ?? 0) + 1 })
 
-  const client = await prisma.client.findUnique({ where: { id: clientId }, select: { relationStart: true } })
+  const client = await prisma.client.findFirst({ where: { id: clientId, organizationId: getOrgId(req) }, select: { relationStart: true } })
   const monthsAsClient = client?.relationStart
     ? Math.floor((Date.now() - new Date(client.relationStart).getTime()) / (1000 * 60 * 60 * 24 * 30.44))
     : null
@@ -151,6 +152,7 @@ clientsRouter.post('/', isAdmin, async (req, res) => {
       relationStart: relationStart ? new Date(relationStart) : null,
       socialMedia: socialMedia === true,
       commercialPartner: commercialPartner === true,
+      organizationId: getOrgId(req),
     },
   })
   await Promise.all([
@@ -164,7 +166,7 @@ clientsRouter.post('/', isAdmin, async (req, res) => {
 
 clientsRouter.patch('/:id', isAdmin, async (req, res) => {
   const { name, contactName, contactInfo, status, industry, tier, website, description, relationStart, color, socialMedia, commercialPartner } = req.body
-  const prev = await prisma.client.findUnique({ where: { id: req.params.id } })
+  const prev = await prisma.client.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) } })
   if (!prev) { res.status(404).json({ error: 'Cliente no encontrado' }); return }
 
   const data: Record<string, unknown> = {}
@@ -199,7 +201,7 @@ clientsRouter.patch('/:id', isAdmin, async (req, res) => {
 
 clientsRouter.get('/:id/contacts', requirePermission('clients.read'), async (req, res) => {
   if (req.user!.role === 'PARTNER') {
-    const c = await prisma.client.findUnique({ where: { id: req.params.id }, select: { commercialPartner: true } })
+    const c = await prisma.client.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) }, select: { commercialPartner: true } })
     if (!c?.commercialPartner) { res.status(403).json({ error: 'Acceso denegado' }); return }
   }
   const contacts = await prisma.clientContact.findMany({
@@ -277,7 +279,7 @@ clientsRouter.delete('/:id/tags/:tagId', isAdmin, async (req, res) => {
 
 clientsRouter.get('/:id/notes', requirePermission('clients.read'), async (req, res) => {
   if (req.user!.role === 'PARTNER') {
-    const c = await prisma.client.findUnique({ where: { id: req.params.id }, select: { commercialPartner: true } })
+    const c = await prisma.client.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) }, select: { commercialPartner: true } })
     if (!c?.commercialPartner) { res.status(403).json({ error: 'Acceso denegado' }); return }
   }
   const limit = Math.min(parseInt(req.query.limit as string) || 10, 50)
@@ -343,7 +345,7 @@ clientsRouter.delete('/:id/notes/:noteId', isAdminOrLead, async (req, res) => {
 
 clientsRouter.get('/:id/history', requirePermission('clients.read'), async (req, res) => {
   if (req.user!.role === 'PARTNER') {
-    const c = await prisma.client.findUnique({ where: { id: req.params.id }, select: { commercialPartner: true } })
+    const c = await prisma.client.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) }, select: { commercialPartner: true } })
     if (!c?.commercialPartner) { res.status(403).json({ error: 'Acceso denegado' }); return }
   }
   const limit = Math.min(parseInt(req.query.limit as string) || 20, 100)
@@ -369,8 +371,8 @@ clientsRouter.get('/:id/history', requirePermission('clients.read'), async (req,
 
 // ── DELETE /:id — delete client (admin only) ──────────────────────────────────
 clientsRouter.delete('/:id', isAdmin, async (req, res) => {
-  const client = await prisma.client.findUnique({
-    where: { id: req.params.id },
+  const client = await prisma.client.findFirst({
+    where: { id: req.params.id, organizationId: getOrgId(req) },
     select: { id: true, name: true, _count: { select: { projects: true } } },
   })
   if (!client) { res.status(404).json({ error: 'Cliente no encontrado' }); return }

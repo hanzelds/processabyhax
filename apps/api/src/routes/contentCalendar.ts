@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma'
 import { isAuth, isAdminOrLead, requirePermission } from '../middleware/auth'
 import { ContentPieceStatus, CopyStatus, ContentType } from '@prisma/client'
 import { sendPieceScheduledEmail, sendPiecePublishedEmail } from '../lib/email'
+import { getOrgId } from '../lib/orgContext'
 
 export const contentCalendarRouter = Router()
 
@@ -41,6 +42,7 @@ contentCalendarRouter.get('/calendar', isAuth, async (req, res) => {
   const where: Record<string, unknown> = {
     scheduledDate: { gte: start, lte: end },
     status: { notIn: ['cancelado'] },
+    organizationId: getOrgId(req),
   }
   if (clientId) where.clientId = clientId as string
   // PARTNER only sees content for their commercial partner clients
@@ -62,6 +64,7 @@ contentCalendarRouter.get('/inbox', isAuth, async (req, res) => {
   const where: Record<string, unknown> = {
     scheduledDate: null,
     status: { in: ['listo', 'en_revision'] },
+    organizationId: getOrgId(req),
   }
   if (clientId) where.clientId = clientId as string
   if (req.user!.role === 'PARTNER') {
@@ -79,7 +82,7 @@ contentCalendarRouter.get('/inbox', isAuth, async (req, res) => {
 // ── GET /pieces — list with filters ──────────────────────────────────────────
 contentCalendarRouter.get('/pieces', isAuth, async (req, res) => {
   const { clientId, status, type, copyStatus } = req.query
-  const where: Record<string, unknown> = {}
+  const where: Record<string, unknown> = { organizationId: getOrgId(req) }
   if (clientId)  where.clientId  = clientId as string
   if (status)    where.status    = status as ContentPieceStatus
   if (type)      where.type      = type as ContentType
@@ -98,8 +101,8 @@ contentCalendarRouter.get('/pieces', isAuth, async (req, res) => {
 
 // ── GET /pieces/:id ───────────────────────────────────────────────────────────
 contentCalendarRouter.get('/pieces/:id', isAuth, async (req, res) => {
-  const piece = await prisma.contentPiece.findUnique({
-    where: { id: req.params.id },
+  const piece = await prisma.contentPiece.findFirst({
+    where: { id: req.params.id, organizationId: getOrgId(req) },
     select: {
       ...PIECE_SELECT,
       history: { include: { actor: { select: { id: true, name: true } } }, orderBy: { createdAt: 'desc' } },
@@ -131,6 +134,7 @@ contentCalendarRouter.post('/pieces', requirePermission('content.write'), async 
       publicationNotes: publicationNotes || null,
       createdById: req.user!.userId,
       briefId: briefId || null,
+      organizationId: getOrgId(req),
       ...(scheduledDate ? {
         scheduledDate: new Date(scheduledDate),
         scheduledTime: scheduledTime || null,

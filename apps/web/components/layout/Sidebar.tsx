@@ -9,7 +9,7 @@ import { User } from '@/types'
 import { SidebarTeamspaces } from './SidebarTeamspaces'
 import {
   CheckSquare, ListTodo, FolderKanban, Users, Building2,
-  Settings, LogOut, ChevronLeft, ChevronRight, CalendarDays, Clapperboard, SlidersHorizontal, BookOpen, HardDrive, ScrollText, BarChart3, Film, LayoutDashboard, Megaphone, KeyRound, type LucideIcon,
+  Settings, LogOut, ChevronLeft, ChevronRight, CalendarDays, Clapperboard, SlidersHorizontal, BookOpen, HardDrive, ScrollText, BarChart3, Film, LayoutDashboard, Megaphone, KeyRound, Shield, type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -297,6 +297,19 @@ export function Sidebar({
               href="/admin/system"
               label="Sistema"
               icon={SlidersHorizontal}
+              collapsed={collapsed}
+            />
+          </div>
+        )}
+
+        {/* Super Admin — only visible to isSuperAdmin users */}
+        {user.isSuperAdmin && (
+          <div className="mb-1">
+            <SectionLabel label="Super Admin" collapsed={collapsed} />
+            <NavItem
+              href="/super-admin"
+              label="Super Admin"
+              icon={Shield}
               collapsed={collapsed}
             />
           </div>

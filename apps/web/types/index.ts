@@ -145,6 +145,10 @@ export interface User {
   createdAt: string
   skills?: Skill[]
   permissions?: string[]
+  isSuperAdmin?: boolean
+  organizationId?: string
+  orgPlan?: string
+  organizations?: Array<{ id: string; name: string; slug: string; plan: string; role: Role }>
   // enriched (list endpoint)
   activeTasks?: number
   overdueTasks?: number

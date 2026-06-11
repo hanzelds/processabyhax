@@ -49,6 +49,17 @@ authRouter.post('/login', async (req, res) => {
     })
   }
 
+  // Resolve organization context
+  const orgMemberships = await prisma.organizationMember.findMany({
+    where: { userId: user.id },
+    include: { organization: { select: { id: true, name: true, slug: true, plan: true, planStatus: true } } },
+    orderBy: { joinedAt: 'asc' },
+  })
+  const activeOrg = orgMemberships.find(m => m.organizationId === user.activeOrganizationId) ?? orgMemberships[0]
+  const effectiveRole = activeOrg?.role ?? user.role
+  const organizationId = activeOrg?.organizationId
+  const orgPlan = activeOrg?.organization.plan
+
   // Create session (jti-based)
   const jti = uuidv4()
   const tokenHash = hashToken(jti)
@@ -60,7 +71,7 @@ authRouter.post('/login', async (req, res) => {
     data: { id: uuidv4(), userId: user.id, tokenHash, deviceInfo, ipAddress, expiresAt },
   })
 
-  const token = signToken({ userId: user.id, role: user.role, name: user.name, jti })
+  const token = signToken({ userId: user.id, role: effectiveRole, name: user.name, jti, organizationId, orgPlan })
   res.cookie('token', token, {
     httpOnly: true,
     secure: process.env.COOKIE_SECURE === 'true',
@@ -68,8 +79,16 @@ authRouter.post('/login', async (req, res) => {
     maxAge: sessionMs,
   })
 
-  const permissions = await getEffectivePermissions(user.id, user.role)
-  res.json({ id: user.id, name: user.name, email: user.email, role: user.role, area: user.area, status: user.status, avatarUrl: user.avatarUrl, permissions })
+  const permissions = await getEffectivePermissions(user.id, effectiveRole)
+  res.json({
+    id: user.id, name: user.name, email: user.email,
+    role: effectiveRole, area: user.area, status: user.status, avatarUrl: user.avatarUrl,
+    permissions, organizationId, orgPlan,
+    organizations: orgMemberships.length > 1 ? orgMemberships.map(m => ({
+      id: m.organizationId, name: m.organization.name, slug: m.organization.slug,
+      plan: m.organization.plan, role: m.role,
+    })) : undefined,
+  })
 })
 
 // ── POST /auth/logout ─────────────────────────────────────────────────────────
@@ -89,7 +108,7 @@ authRouter.post('/logout', isAuth, async (req, res) => {
 authRouter.get('/me', isAuth, async (req, res) => {
   const user = await prisma.user.findUnique({
     where: { id: req.user!.userId },
-    select: { id: true, name: true, email: true, role: true, area: true, status: true, avatarUrl: true, bio: true, joinedAt: true, lastSeenAt: true, createdAt: true },
+    select: { id: true, name: true, email: true, role: true, area: true, status: true, avatarUrl: true, bio: true, joinedAt: true, lastSeenAt: true, createdAt: true, isSuperAdmin: true },
   })
   if (!user) { res.status(404).json({ error: 'Usuario no encontrado' }); return }
   const permissions = await getEffectivePermissions(user.id, user.role)
@@ -176,4 +195,115 @@ authRouter.post('/accept-invitation', async (req, res) => {
   ])
 
   res.json({ ok: true, user })
+})
+
+// ── POST /auth/switch-org ─────────────────────────────────────────────────────
+
+authRouter.post('/switch-org', isAuth, async (req, res) => {
+  const { organizationId } = req.body
+  if (!organizationId) { res.status(400).json({ error: 'organizationId requerido' }); return }
+
+  const membership = await prisma.organizationMember.findUnique({
+    where: { organizationId_userId: { organizationId, userId: req.user!.userId } },
+    include: { organization: { select: { id: true, name: true, slug: true, plan: true, planStatus: true } } },
+  })
+  if (!membership) { res.status(403).json({ error: 'No perteneces a esta organización' }); return }
+  if (membership.organization.planStatus === 'SUSPENDED') {
+    res.status(403).json({ error: 'Organización suspendida' }); return
+  }
+
+  await prisma.user.update({
+    where: { id: req.user!.userId },
+    data: { activeOrganizationId: organizationId },
+  })
+
+  const settings = await getSettings()
+  const sessionDays = parseInt(settings.session_duration_days ?? '30', 10) || 30
+  const sessionMs = sessionDays * 24 * 60 * 60 * 1000
+  const jti = uuidv4()
+  const tokenHash = hashToken(jti)
+  await prisma.refreshToken.create({
+    data: { id: uuidv4(), userId: req.user!.userId, tokenHash, expiresAt: new Date(Date.now() + sessionMs) },
+  })
+  // Revoke old token
+  if (req.user!.jti) {
+    const oldHash = (await import('crypto')).createHash('sha256').update(req.user!.jti).digest('hex')
+    await prisma.refreshToken.updateMany({ where: { tokenHash: oldHash }, data: { revokedAt: new Date() } }).catch(() => {})
+  }
+
+  const { signToken: sign } = await import('../middleware/auth')
+  const token = sign({
+    userId: req.user!.userId, role: membership.role, name: req.user!.name, jti,
+    organizationId: membership.organizationId, orgPlan: membership.organization.plan,
+  })
+  res.cookie('token', token, {
+    httpOnly: true, secure: process.env.COOKIE_SECURE === 'true', sameSite: 'lax', maxAge: sessionMs,
+  })
+  res.json({ ok: true, organizationId, role: membership.role, orgPlan: membership.organization.plan })
+})
+
+// ── POST /auth/register-org ───────────────────────────────────────────────────
+
+authRouter.post('/register-org', async (req, res) => {
+  const { name, email, password, timezone } = req.body
+  if (!name || !email || !password) {
+    res.status(400).json({ error: 'Nombre, email y contraseña requeridos' }); return
+  }
+  if (password.length < 8) {
+    res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' }); return
+  }
+
+  const existingUser = await prisma.user.findUnique({ where: { email } })
+  if (existingUser) { res.status(409).json({ error: 'Este email ya está registrado' }); return }
+
+  // Generate unique slug from org name
+  const baseSlug = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
+  let slug = baseSlug
+  let attempt = 1
+  while (await prisma.organization.findUnique({ where: { slug } })) {
+    slug = `${baseSlug}-${attempt++}`
+  }
+
+  const hashed = await bcrypt.hash(password, 10)
+  const trialEnd = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+
+  const org = await prisma.organization.create({
+    data: {
+      name, slug,
+      plan: 'TRIAL', planStatus: 'ACTIVE',
+      trialEndsAt: trialEnd,
+      timezone: timezone || 'America/Santo_Domingo',
+      maxUsers: 9999, maxClients: 9999, storageGb: 100,
+    },
+  })
+
+  const user = await prisma.user.create({
+    data: {
+      name, email, password: hashed,
+      role: 'ADMIN', status: 'ACTIVE',
+      activeOrganizationId: org.id,
+    },
+  })
+
+  await prisma.organizationMember.create({
+    data: { organizationId: org.id, userId: user.id, role: 'ADMIN' },
+  })
+
+  const sessionMs = 30 * 24 * 60 * 60 * 1000
+  const jti = uuidv4()
+  const tokenHash = hashToken(jti)
+  await prisma.refreshToken.create({
+    data: { id: uuidv4(), userId: user.id, tokenHash, expiresAt: new Date(Date.now() + sessionMs) },
+  })
+
+  const token = signToken({ userId: user.id, role: 'ADMIN', name: user.name, jti, organizationId: org.id, orgPlan: 'TRIAL' })
+  res.cookie('token', token, {
+    httpOnly: true, secure: process.env.COOKIE_SECURE === 'true', sameSite: 'lax', maxAge: sessionMs,
+  })
+
+  res.status(201).json({
+    ok: true,
+    user: { id: user.id, name: user.name, email: user.email, role: 'ADMIN' },
+    organization: { id: org.id, name: org.name, slug: org.slug, plan: org.plan, trialEndsAt: org.trialEndsAt },
+  })
 })

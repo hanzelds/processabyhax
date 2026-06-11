@@ -7,6 +7,7 @@ import { logProjectHistory } from '../lib/projectHistory'
 import { sendTaskAssignedEmail, sendTaskStatusChangedEmail, sendGenericEmail } from '../lib/email'
 import { getSettings } from '../lib/settings'
 import { createNotification, createNotifications } from '../lib/notify'
+import { getOrgId } from '../lib/orgContext'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -106,7 +107,7 @@ tasksRouter.get('/my', isAuth, async (req, res) => {
   const today    = new Date(); today.setHours(0, 0, 0, 0)
   const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1)
 
-  const baseWhere = { assignees: { some: { userId } }, status: { notIn: ['COMPLETED'] as TaskStatus[] } }
+  const baseWhere = { organizationId: getOrgId(req), assignees: { some: { userId } }, status: { notIn: ['COMPLETED'] as TaskStatus[] } }
   const include   = {
     assignees: { include: ASSIGNEE_INCLUDE },
     project:   { include: { client: { select: { id: true, name: true } } } },
@@ -131,7 +132,7 @@ tasksRouter.get('/my/count', isAuth, async (req, res) => {
   const today    = new Date(); today.setHours(0, 0, 0, 0)
   const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1)
   const count = await prisma.task.count({
-    where: { assignees: { some: { userId } }, status: { notIn: ['COMPLETED'] }, dueDate: { lt: tomorrow } },
+    where: { organizationId: getOrgId(req), assignees: { some: { userId } }, status: { notIn: ['COMPLETED'] }, dueDate: { lt: tomorrow } },
   })
   res.json({ count })
 })
@@ -143,6 +144,7 @@ tasksRouter.get('/project/:projectId', isAuth, async (req, res) => {
   const isAdminOrLead = user!.role === 'ADMIN' || user!.role === 'LEAD'
   const tasks = await prisma.task.findMany({
     where: {
+      organizationId: getOrgId(req),
       projectId: req.params.projectId,
       ...(!isAdminOrLead ? { assignees: { some: { userId: user!.userId } } } : {}),
     },
@@ -186,6 +188,7 @@ tasksRouter.post('/bulk', isAuth, async (req, res) => {
           projectId,
           dueDate:   r.dueDate ? new Date(r.dueDate) : null,
           taskType:  (r.taskType as TaskType | undefined) ?? null,
+          organizationId: getOrgId(req),
           assignees: r.assignees && r.assignees.length > 0
             ? { create: r.assignees.map(uid => ({ userId: uid, assignedBy: userId })) }
             : undefined,
@@ -293,6 +296,7 @@ tasksRouter.get('/standalone', isAuth, async (req, res) => {
   }
 
   const baseWhere = {
+    organizationId: getOrgId(req),
     projectId: null,
     assignees: { some: { userId: targetUserId } },
   }
@@ -357,6 +361,7 @@ tasksRouter.post('/', isAuth, async (req, res) => {
       projectId: projectId || null,
       dueDate:   dueDate ? new Date(dueDate) : null,
       taskType:  taskType as TaskType | undefined ?? null,
+      organizationId: getOrgId(req),
       assignees: effectiveAssignees.length > 0
         ? { create: effectiveAssignees.map(uid => ({ userId: uid, assignedBy: userId })) }
         : undefined,
