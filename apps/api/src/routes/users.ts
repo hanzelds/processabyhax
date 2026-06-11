@@ -14,6 +14,8 @@ import {
   ALL_PERMISSIONS, PERMISSION_LABEL, PERMISSION_MODULE,
   ROLE_DEFAULTS, getEffectivePermissions, Permission
 } from '../lib/permissions'
+import { assertUserLimit, handleLimitError } from '../lib/usageLimits'
+import { getOrgId } from '../lib/orgContext'
 
 export const usersRouter = Router()
 
@@ -230,6 +232,14 @@ usersRouter.post('/', isAdmin, async (req, res) => {
   const exists = await prisma.user.findUnique({ where: { email } })
   if (exists) { res.status(409).json({ error: 'El email ya está registrado' }); return }
 
+  // Check user limit before creating
+  try {
+    await assertUserLimit(getOrgId(req))
+  } catch (err) {
+    if (handleLimitError(err, res)) return
+    throw err
+  }
+
   // Create user with INVITED status and a placeholder password
   const placeholder = await bcrypt.hash(uuidv4(), 10)
   const user = await prisma.user.create({
@@ -242,6 +252,11 @@ usersRouter.post('/', isAdmin, async (req, res) => {
       joinedAt: joinedAt ? new Date(joinedAt) : null,
     },
     select: { id: true, name: true, email: true, role: true, area: true, status: true, createdAt: true },
+  })
+
+  // Add user to the organization
+  await prisma.organizationMember.create({
+    data: { organizationId: getOrgId(req), userId: user.id, role: (role as Role) || 'TEAM' },
   })
 
   // Generate invitation token

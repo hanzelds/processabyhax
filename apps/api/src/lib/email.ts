@@ -705,6 +705,45 @@ export async function sendCommentOnStatusChangeEmail(params: {
   if (error) console.error('[EMAIL] Comment on status change error:', error)
 }
 
+// ── Usage alert (80% plan limit warning) ─────────────────────────────────────
+
+export async function sendUsageAlertEmail(
+  to: string,
+  orgName: string,
+  usageLines: string[],
+  pct: number,
+): Promise<void> {
+  if (!process.env.RESEND_API_KEY) {
+    console.log(`[EMAIL] Usage alert for "${orgName}" (${to}): ${usageLines.join(', ')}`)
+    return
+  }
+  if (!await emailEnabled()) return
+  const cfg = await getEmailConfig()
+
+  const lineItems = usageLines
+    .map(line => `<li style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;color:#1e293b;padding:4px 0;">${line}</li>`)
+    .join('')
+
+  const html = EMAIL_WRAPPER_OPEN
+    + h1(`⚠️ Uso al ${pct}% en ${orgName}`)
+    + p(`Tu organización está alcanzando los límites de tu plan actual. Considera actualizar tu plan para evitar interrupciones en tu servicio.`)
+    + card([
+        `<p style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.8px;margin:0 0 12px;">Recursos cerca del límite</p>`,
+        `<ul style="margin:0;padding:0 0 0 18px;">${lineItems}</ul>`,
+      ])
+    + btn(`${cfg.APP_URL}/settings/billing`, 'Ver plan y actualizar')
+    + `<p style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:12px;color:#94a3b8;margin:16px 0 0;line-height:1.6;">Si ya actualizaste tu plan, puedes ignorar este correo.</p>`
+    + EMAIL_WRAPPER_CLOSE
+
+  const { error } = await resend.emails.send({
+    from: cfg.FROM,
+    to,
+    subject: `⚠️ Processa — Límite de uso al ${pct}%`,
+    html,
+  })
+  if (error) console.error('[EMAIL] Usage alert error:', error)
+}
+
 export async function sendGenericEmail(params: { to: string; subject: string; html: string }): Promise<void> {
   if (!await emailEnabled()) return
   const cfg = await getEmailConfig()

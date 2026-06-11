@@ -5,6 +5,7 @@ import { ClientStatus, ClientTier } from '@prisma/client'
 import { logActivity } from '../lib/activityLogger'
 import { logClientHistory, relativeTime } from '../lib/clientHistory'
 import { getOrgId } from '../lib/orgContext'
+import { assertClientLimit, handleLimitError } from '../lib/usageLimits'
 
 export const clientsRouter = Router()
 
@@ -142,6 +143,15 @@ clientsRouter.post('/', isAdmin, async (req, res) => {
   if (!name || !contactName || !contactInfo) {
     res.status(400).json({ error: 'Nombre, contacto y dato de contacto son requeridos' }); return
   }
+
+  // Check client limit before creating
+  try {
+    await assertClientLimit(getOrgId(req))
+  } catch (err) {
+    if (handleLimitError(err, res)) return
+    throw err
+  }
+
   const client = await prisma.client.create({
     data: {
       name, contactName, contactInfo,

@@ -320,4 +320,154 @@ router.post(
   }
 )
 
+// ─── GET /export — GDPR data export ──────────────────────────────────────────
+router.get('/export', isAuth, isAdmin, async (req: Request, res: Response) => {
+  try {
+    const orgId = getOrgId(req)
+
+    const [org, members, clients, projectCount, briefCount, contentPieceCount, taskCount] = await Promise.all([
+      prisma.organization.findUnique({
+        where: { id: orgId },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          plan: true,
+          planStatus: true,
+          createdAt: true,
+        },
+      }),
+      prisma.organizationMember.findMany({
+        where: { organizationId: orgId },
+        select: {
+          role: true,
+          createdAt: true,
+          user: { select: { name: true, email: true } },
+        },
+      }),
+      prisma.client.findMany({
+        where: { organizationId: orgId },
+        select: { name: true },
+      }),
+      prisma.project.count({ where: { organizationId: orgId } }),
+      prisma.contentBrief.count({ where: { organizationId: orgId } }),
+      prisma.contentPiece.count({ where: { organizationId: orgId } }),
+      prisma.task.count({ where: { organizationId: orgId } }),
+    ])
+
+    if (!org) {
+      res.status(404).json({ error: 'Organización no encontrada' })
+      return
+    }
+
+    const exportedAt = new Date().toISOString()
+    const dateStr = exportedAt.slice(0, 10)
+
+    res.setHeader('Content-Type', 'application/json')
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="processa-export-${org.slug}-${dateStr}.json"`
+    )
+
+    res.json({
+      exportedAt,
+      organization: {
+        id: org.id,
+        name: org.name,
+        slug: org.slug,
+        plan: org.plan,
+        planStatus: org.planStatus,
+        createdAt: org.createdAt,
+      },
+      summary: {
+        members: members.length,
+        clients: clients.length,
+        projects: projectCount,
+        briefs: briefCount,
+        contentPieces: contentPieceCount,
+        tasks: taskCount,
+      },
+      members: members.map(m => ({
+        name: m.user.name,
+        email: m.user.email,
+        role: m.role,
+        joinedAt: m.createdAt,
+      })),
+      clients: clients.map(c => ({ name: c.name })),
+    })
+  } catch (err) {
+    console.error('[billing] GET /export error:', err)
+    res.status(500).json({ error: 'Error al exportar datos' })
+  }
+})
+
+// ─── DELETE /account — GDPR account purge ────────────────────────────────────
+router.delete('/account', isAuth, isAdmin, async (req: Request, res: Response) => {
+  try {
+    const { confirm } = req.body as { confirm?: string }
+
+    if (confirm !== 'ELIMINAR') {
+      res.status(400).json({
+        error: 'Confirmación requerida. Envía { "confirm": "ELIMINAR" } para proceder.',
+      })
+      return
+    }
+
+    const orgId = getOrgId(req)
+
+    // Collect all member user IDs before deletion (for token revocation)
+    const members = await prisma.organizationMember.findMany({
+      where: { organizationId: orgId },
+      select: { userId: true },
+    })
+    const memberUserIds = members.map(m => m.userId)
+
+    // Nullify organization_id on models where it is nullable (avoid FK constraint errors)
+    const tables = [
+      'clients',
+      'projects',
+      'tasks',
+      'content_briefs',
+      'content_pieces',
+      'scripts',
+      'shoots',
+      'teamspaces',
+      'gear_items',
+      'locations',
+      'vehicles',
+      'admin_tasks',
+      'admin_task_recurrences',
+      'services',
+      'activity_log',
+      'notifications',
+      'doc_pages',
+    ]
+
+    for (const table of tables) {
+      await prisma.$executeRawUnsafe(
+        `UPDATE "${table}" SET organization_id = NULL WHERE organization_id = $1`,
+        orgId
+      )
+    }
+
+    // Delete the organization (cascades OrganizationMember, OrgSetting via Prisma onDelete: Cascade)
+    await prisma.organization.delete({ where: { id: orgId } })
+
+    // Revoke all refresh tokens for all org members
+    if (memberUserIds.length > 0) {
+      await prisma.refreshToken.deleteMany({
+        where: { userId: { in: memberUserIds } },
+      })
+    }
+
+    // Clear auth cookie
+    res.clearCookie('token', { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' })
+
+    res.json({ ok: true, message: 'Organización eliminada permanentemente' })
+  } catch (err) {
+    console.error('[billing] DELETE /account error:', err)
+    res.status(500).json({ error: 'Error al eliminar la organización' })
+  }
+})
+
 export default router
