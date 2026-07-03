@@ -60,7 +60,7 @@ projectsRouter.get('/', isAuth, async (req, res) => {
   // PARTNER sees all projects for their commercial partner clients
   if (user!.role === 'PARTNER') {
     const { clientId, status: statusFilter } = req.query
-    const where: Record<string, unknown> = { organizationId: getOrgId(req), client: { commercialPartner: true } }
+    const where: Record<string, unknown> = { organizationId: getOrgId(req), client: { commercialPartner: true, archivedAt: null } }
     if (clientId) where.clientId = clientId as string
     if (statusFilter) where.status = statusFilter as ProjectStatus
     const projects = await prisma.project.findMany({
@@ -91,7 +91,7 @@ projectsRouter.get('/', isAuth, async (req, res) => {
     : { tasks: { some: { assignees: { some: { userId: user!.userId } } } } }
 
   const { clientId, status: statusFilter } = req.query
-  const where: Record<string, unknown> = { ...baseWhere, organizationId: getOrgId(req) }
+  const where: Record<string, unknown> = { ...baseWhere, organizationId: getOrgId(req), client: { archivedAt: null } }
   if (clientId) where.clientId = clientId as string
   if (statusFilter) where.status = statusFilter as ProjectStatus
 

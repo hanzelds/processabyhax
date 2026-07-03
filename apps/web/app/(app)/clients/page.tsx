@@ -4,11 +4,21 @@ import { redirect } from 'next/navigation'
 import { Client } from '@/types'
 import { NewClientModal } from '@/components/ui/NewClientModal'
 import { ClientCard } from '@/components/clients/ClientCard'
+import { ArchivedClientsSection } from '@/components/clients/ArchivedClientsSection'
 
 const API = process.env.API_INTERNAL_URL || 'http://localhost:4100'
 
 async function getClients(token: string): Promise<Client[]> {
   const res = await fetch(`${API}/api/clients`, {
+    headers: { Cookie: `token=${token}` },
+    cache: 'no-store',
+  })
+  if (!res.ok) return []
+  return res.json()
+}
+
+async function getArchivedClients(token: string): Promise<Client[]> {
+  const res = await fetch(`${API}/api/clients?archived=true`, {
     headers: { Cookie: `token=${token}` },
     cache: 'no-store',
   })
@@ -22,7 +32,10 @@ export default async function ClientsPage() {
 
   const cookieStore = await cookies()
   const token = cookieStore.get('token')?.value || ''
-  const clients = await getClients(token)
+  const [clients, archived] = await Promise.all([
+    getClients(token),
+    getArchivedClients(token),
+  ])
 
   const active    = clients.filter(c => c.status === 'ACTIVE')
   const potential = clients.filter(c => c.status === 'POTENTIAL')
@@ -41,7 +54,7 @@ export default async function ClientsPage() {
         {user?.role !== 'PARTNER' && <NewClientModal />}
       </div>
 
-      {clients.length === 0 ? (
+      {clients.length === 0 && archived.length === 0 ? (
         <div className="text-center py-20 text-slate-400">
           <p className="text-4xl mb-4">◉</p>
           <p className="text-lg font-medium text-slate-500">No hay clientes aún</p>
@@ -66,6 +79,9 @@ export default async function ClientsPage() {
               <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Inactivos ({inactive.length})</h2>
               <div className="grid gap-3">{inactive.map(c => <ClientCard key={c.id} client={c} />)}</div>
             </section>
+          )}
+          {archived.length > 0 && (
+            <ArchivedClientsSection clients={archived} />
           )}
         </div>
       )}

@@ -122,12 +122,21 @@ enum ActivityEventType {
   project_status_changed
   client_created
   client_status_changed
+  org_updated
+  org_suspended
+  org_reactivated
+  user_suspended
+  user_reactivated
+  user_sa_granted
+  user_sa_revoked
 }
 
 enum ActivityEntityType {
   task
   project
   client
+  organization
+  user
 }
 
 model Organization {
@@ -194,6 +203,7 @@ model User {
   lastSeenAt           DateTime?
   isSuperAdmin         Boolean    @default(false) @map("is_super_admin")
   activeOrganizationId String?    @map("active_organization_id")
+  telegramChatId       String?    @map("telegram_chat_id")
   createdAt            DateTime   @default(now())
 
   taskAssignments     TaskAssignee[]
@@ -343,8 +353,10 @@ model Client {
   socialMedia       Boolean      @default(false)
   commercialPartner Boolean      @default(false) @map("commercial_partner")
   createdAt      DateTime     @default(now())
+  archivedAt     DateTime?    @map("archived_at")
 
   @@index([organizationId])
+  @@index([organizationId, archivedAt])
   projects      Project[]
   contacts      ClientContact[]
   tags          ClientTag[]

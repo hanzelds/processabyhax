@@ -54,9 +54,11 @@ shootsRouter.get('/', async (req: Request, res: Response) => {
   // TEAM users only see shoots where they are in crew
   if (user.role === 'TEAM') {
     where.crew = { some: { userId: user.userId } }
-  } else if (user.role === 'PARTNER') {
-    // PARTNER only sees shoots for their commercial partner clients
-    where.client = { commercialPartner: true }
+  }
+  if (user.role === 'PARTNER') {
+    where.client = { commercialPartner: true, archivedAt: null }
+  } else {
+    where.OR = [{ clientId: null }, { client: { archivedAt: null } }]
   }
   if (status)    where.status    = status
   if (projectId) where.projectId = projectId

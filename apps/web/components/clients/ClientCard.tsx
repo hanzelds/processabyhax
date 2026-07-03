@@ -10,7 +10,7 @@ function monthsSince(date: string): string {
   return `${years} año${years !== 1 ? 's' : ''}`
 }
 
-export function ClientCard({ client }: { client: Client }) {
+export function ClientCard({ client, archived }: { client: Client; archived?: boolean }) {
   const isInactive = client.status === 'INACTIVE'
 
   const bg = clientBgColor(client.id, client.color)
@@ -18,7 +18,7 @@ export function ClientCard({ client }: { client: Client }) {
   return (
     <Link
       href={`/clients/${client.id}`}
-      className={`block bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-sm hover:border-slate-300 transition-all ${isInactive ? 'opacity-60' : ''}`}
+      className={`block bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-sm hover:border-slate-300 transition-all ${isInactive || archived ? 'opacity-50' : ''}`}
     >
       <div className="h-1 w-full" style={{ backgroundColor: bg }} />
       <div className="flex items-start justify-between gap-4 px-5 py-4">
@@ -26,9 +26,16 @@ export function ClientCard({ client }: { client: Client }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <p className="font-semibold text-slate-900 truncate">{client.name}</p>
-            <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${CLIENT_STATUS_COLOR[client.status]}`}>
-              {CLIENT_STATUS_LABEL[client.status]}
-            </span>
+            {archived && (
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium shrink-0 bg-slate-100 text-slate-500 border border-slate-200">
+                Archivado
+              </span>
+            )}
+            {!archived && (
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${CLIENT_STATUS_COLOR[client.status]}`}>
+                {CLIENT_STATUS_LABEL[client.status]}
+              </span>
+            )}
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${CLIENT_TIER_COLOR[client.tier]}`}>
               {CLIENT_TIER_LABEL[client.tier]}
             </span>

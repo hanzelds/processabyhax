@@ -56,7 +56,7 @@ briefsRouter.get('/', isAuth, async (req, res) => {
   const { clientId, type, status, search, limit } = req.query
   const { user } = req
 
-  const where: Record<string, unknown> = { organizationId: getOrgId(req) }
+  const where: Record<string, unknown> = { organizationId: getOrgId(req), client: { archivedAt: null } }
   if (clientId) where.clientId = clientId as string
   if (type)     where.type     = type as ContentType
   if (status)   where.status   = status as BriefStatus

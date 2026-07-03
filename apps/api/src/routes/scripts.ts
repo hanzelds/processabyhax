@@ -29,6 +29,8 @@ router.get('/', isAuth, async (req: Request, res: Response) => {
       where.brief = { assignees: { some: { userId } } }
     }
 
+    where.client = { archivedAt: null }
+
     const scripts = await prisma.script.findMany({
       where,
       include: SCRIPT_INCLUDE,

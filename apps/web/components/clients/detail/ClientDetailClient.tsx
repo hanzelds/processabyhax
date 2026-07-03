@@ -17,7 +17,7 @@ import { ClientHistoryTab } from './history/ClientHistoryTab'
 import { ClientPortalTab } from './portal/ClientPortalTab'
 import { ClientDocsTab } from './docs/ClientDocsTab'
 import { api } from '@/lib/api'
-import { Trash2 } from 'lucide-react'
+import { Trash2, Archive, ArchiveRestore } from 'lucide-react'
 import { DocPageSummary } from '@/types'
 import { useToast } from '@/components/ui/Toast'
 import { useConfirm } from '@/components/ui/ConfirmDialog'
@@ -43,10 +43,36 @@ export function ClientDetailClient({ client: initialClient, contacts, metrics, n
   const searchParams            = useSearchParams()
   const tabParam                = searchParams.get('tab') as ClientTabId | null
   const [activeTab, setActiveTab] = useState<ClientTabId>(tabParam ?? 'profile')
-  const [deleting, setDeleting] = useState(false)
+  const [deleting, setDeleting]   = useState(false)
+  const [archiving, setArchiving] = useState(false)
   const router  = useRouter()
   const toast   = useToast()
   const confirm = useConfirm()
+
+  async function handleArchive() {
+    const isArchived = !!client.archivedAt
+    const action = isArchived ? 'unarchive' : 'archive'
+    const label  = isArchived ? 'desarchivar' : 'archivar'
+    const ok = await confirm({
+      title: isArchived ? 'Desarchivar cliente' : 'Archivar cliente',
+      message: isArchived
+        ? `¿Desarchivar a "${client.name}"? Volverá a aparecer en todos los módulos.`
+        : `¿Archivar a "${client.name}"? Desaparecerá de todos los módulos excepto la sección de clientes.`,
+      confirmLabel: isArchived ? 'Desarchivar' : 'Archivar',
+      danger: false,
+    })
+    if (!ok) return
+    setArchiving(true)
+    try {
+      const updated = await api.patch<Partial<Client>>(`/api/clients/${client.id}/${action}`, {})
+      setClient(prev => ({ ...prev, ...updated }))
+      toast.success(`Cliente ${label}do`)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : `Error al ${label} el cliente`)
+    } finally {
+      setArchiving(false)
+    }
+  }
 
   async function handleDelete() {
     const totalProjects = client._count?.projects ?? client.totalProjects ?? 0
@@ -92,6 +118,11 @@ export function ClientDetailClient({ client: initialClient, contacts, metrics, n
           <div>
           <div className="flex items-center gap-3 flex-wrap mb-1">
             <h1 className="text-2xl font-semibold text-slate-900">{client.name}</h1>
+            {client.archivedAt && (
+              <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-slate-100 text-slate-500 border border-slate-200">
+                Archivado
+              </span>
+            )}
             <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${CLIENT_STATUS_COLOR[client.status]}`}>
               {CLIENT_STATUS_LABEL[client.status]}
             </span>
@@ -103,15 +134,28 @@ export function ClientDetailClient({ client: initialClient, contacts, metrics, n
           </div>
         </div>
         {isAdmin && (
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition border border-transparent hover:border-red-100 disabled:opacity-50"
-            title="Eliminar cliente"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            {deleting ? 'Eliminando…' : 'Eliminar'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleArchive}
+              disabled={archiving}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition border border-transparent hover:border-slate-200 disabled:opacity-50"
+              title={client.archivedAt ? 'Desarchivar cliente' : 'Archivar cliente'}
+            >
+              {client.archivedAt
+                ? <><ArchiveRestore className="w-3.5 h-3.5" />{archiving ? 'Desarchivando…' : 'Desarchivar'}</>
+                : <><Archive className="w-3.5 h-3.5" />{archiving ? 'Archivando…' : 'Archivar'}</>
+              }
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition border border-transparent hover:border-red-100 disabled:opacity-50"
+              title="Eliminar cliente"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              {deleting ? 'Eliminando…' : 'Eliminar'}
+            </button>
+          </div>
         )}
       </div>
 

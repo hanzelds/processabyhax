@@ -212,6 +212,7 @@ export interface Client {
   color?: string | null
   socialMedia?: boolean
   commercialPartner?: boolean
+  archivedAt?: string | null
   createdAt: string
   _count?: { projects: number }
   projects?: Project[]

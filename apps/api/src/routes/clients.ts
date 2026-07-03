@@ -24,8 +24,14 @@ async function clientMetricsInline(clientId: string) {
 
 clientsRouter.get('/', requirePermission('clients.read'), async (req, res) => {
   const isPartner = req.user!.role === 'PARTNER'
+  const showArchived = req.query.archived === 'true'
+
+  const baseWhere = isPartner
+    ? { organizationId: getOrgId(req), commercialPartner: true }
+    : { organizationId: getOrgId(req) }
+
   const clients = await prisma.client.findMany({
-    where: isPartner ? { organizationId: getOrgId(req), commercialPartner: true } : { organizationId: getOrgId(req) },
+    where: { ...baseWhere, archivedAt: showArchived ? { not: null } : null },
     orderBy: [{ tier: 'asc' }, { name: 'asc' }],
     include: {
       _count: { select: { projects: true } },
@@ -377,6 +383,32 @@ clientsRouter.get('/:id/history', requirePermission('clients.read'), async (req,
     total,
     hasMore: offset + limit < total,
   })
+})
+
+// ── PATCH /:id/archive & /:id/unarchive ──────────────────────────────────────
+
+clientsRouter.patch('/:id/archive', requirePermission('clients.archive'), async (req, res) => {
+  const client = await prisma.client.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) } })
+  if (!client) { res.status(404).json({ error: 'Cliente no encontrado' }); return }
+  if (client.archivedAt) { res.status(400).json({ error: 'El cliente ya está archivado' }); return }
+  const updated = await prisma.client.update({ where: { id: req.params.id }, data: { archivedAt: new Date() } })
+  await Promise.all([
+    logActivity({ actorId: req.user!.userId, eventType: 'client_archived', entityType: 'client', entityId: client.id, entityName: client.name }),
+    logClientHistory({ clientId: client.id, actorId: req.user!.userId, eventType: 'client_archived', description: `Cliente archivado por ${req.user!.name ?? 'Admin'}` }),
+  ])
+  res.json(updated)
+})
+
+clientsRouter.patch('/:id/unarchive', requirePermission('clients.archive'), async (req, res) => {
+  const client = await prisma.client.findFirst({ where: { id: req.params.id, organizationId: getOrgId(req) } })
+  if (!client) { res.status(404).json({ error: 'Cliente no encontrado' }); return }
+  if (!client.archivedAt) { res.status(400).json({ error: 'El cliente no está archivado' }); return }
+  const updated = await prisma.client.update({ where: { id: req.params.id }, data: { archivedAt: null } })
+  await Promise.all([
+    logActivity({ actorId: req.user!.userId, eventType: 'client_unarchived', entityType: 'client', entityId: client.id, entityName: client.name }),
+    logClientHistory({ clientId: client.id, actorId: req.user!.userId, eventType: 'client_unarchived', description: `Cliente desarchivado por ${req.user!.name ?? 'Admin'}` }),
+  ])
+  res.json(updated)
 })
 
 // ── DELETE /:id — delete client (admin only) ──────────────────────────────────

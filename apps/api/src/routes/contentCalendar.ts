@@ -45,10 +45,9 @@ contentCalendarRouter.get('/calendar', isAuth, async (req, res) => {
     organizationId: getOrgId(req),
   }
   if (clientId) where.clientId = clientId as string
-  // PARTNER only sees content for their commercial partner clients
-  if (req.user!.role === 'PARTNER') {
-    where.client = { commercialPartner: true }
-  }
+  where.client = req.user!.role === 'PARTNER'
+    ? { commercialPartner: true, archivedAt: null }
+    : { archivedAt: null }
 
   const pieces = await prisma.contentPiece.findMany({
     where,
@@ -67,9 +66,9 @@ contentCalendarRouter.get('/inbox', isAuth, async (req, res) => {
     organizationId: getOrgId(req),
   }
   if (clientId) where.clientId = clientId as string
-  if (req.user!.role === 'PARTNER') {
-    where.client = { commercialPartner: true }
-  }
+  where.client = req.user!.role === 'PARTNER'
+    ? { commercialPartner: true, archivedAt: null }
+    : { archivedAt: null }
 
   const pieces = await prisma.contentPiece.findMany({
     where,
@@ -87,9 +86,9 @@ contentCalendarRouter.get('/pieces', isAuth, async (req, res) => {
   if (status)    where.status    = status as ContentPieceStatus
   if (type)      where.type      = type as ContentType
   if (copyStatus) where.copyStatus = copyStatus as CopyStatus
-  if (req.user!.role === 'PARTNER') {
-    where.client = { commercialPartner: true }
-  }
+  where.client = req.user!.role === 'PARTNER'
+    ? { commercialPartner: true, archivedAt: null }
+    : { archivedAt: null }
 
   const pieces = await prisma.contentPiece.findMany({
     where,
